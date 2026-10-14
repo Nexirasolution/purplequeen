@@ -5,9 +5,9 @@ import { Tag, Truck } from 'lucide-react';
 
 // Palette: #4B087A #F7B900 #FFF5E8 #24052F #D9B4E8
 // Keep these tokens in sync with Navbar if you tweak the palette.
-const BG = '#4B087A';                       // royal purple bar
+const BG = '#6B2682';                       // slightly darker medium purple
 const TEXT = '#FFF5E8';                     // ivory text
-const TEXT_FAINT = 'rgba(255, 245, 232, 0.7)';
+const TEXT_FAINT = 'rgba(255, 245, 232, 0.75)';
 const ACCENT = '#F7B900';                   // gold icons / coupon code underline
 
 // A quiet serif, matched to the wordmark used elsewhere on the site,

@@ -14,9 +14,10 @@ const PHONES = ['9791368249', '8300770783'];
 const EMAIL = 'purple.queen2512@gmail.com';
 const DEFAULT_WHATSAPP = '919791368249';
 
-// Palette: #4B087A #F7B900 #FFF5E8 #24052F #D9B4E8
-// Royal purple footer with ivory text and gold accents. Keep in sync with FooterLinks.
-const BG = '#4B087A';
+// Palette: #6B2682 #F7B900 #FFF5E8 #24052F #D9B4E8
+// Medium purple footer with ivory text and gold accents.
+// Keep BG in sync with CouponMarquee and Navbar. Keep the rest in sync with FooterLinks.
+const BG = '#6B2682';
 const ACCENT = '#F7B900';
 const TEXT = '#FFF5E8';
 const TEXT_SOFT = 'rgba(255,245,232,0.75)';
