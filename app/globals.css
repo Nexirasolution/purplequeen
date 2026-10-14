@@ -1,0 +1,167 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Fonts (--font-display and --font-body are set by next/font in layout.js) */
+
+  /* Brand palette: #4B087A #F7B900 #FFF5E8 #24052F #D9B4E8 */
+  --brand-purple: #4B087A;         /* primary (royal purple) */
+  --brand-purple-dark: #36055A;    /* primary hover (darker shade of purple) */
+  --brand-gold: #F7B900;           /* buttons and premium details */
+  --brand-gold-dark: #D9A000;      /* gold hover (darker shade) */
+  --brand-gold-text: #8A6500;      /* text-safe gold for use on ivory */
+  --brand-ivory: #FFF5E8;          /* page background */
+  --brand-lavender: #D9B4E8;       /* borders, soft fills */
+  --brand-lavender-light: #F3E6F8; /* wash fill (light tint of lavender) */
+  --brand-ink: #24052F;            /* text */
+
+  --brand-border: var(--brand-lavender);
+
+  /* Legacy aliases: existing var(--brand-teal*), var(--brand-cream) and var(--brand-sand*)
+     references keep working and now resolve to the new palette. */
+  --brand-teal: var(--brand-purple);
+  --brand-teal-dark: var(--brand-purple-dark);
+  --brand-cream: var(--brand-ivory);
+  --brand-sand: var(--brand-lavender);
+  --brand-sand-light: var(--brand-lavender-light);
+  --brand-peach: var(--brand-gold);
+  --brand-peach-dark: var(--brand-gold-text);
+  --brand-peach-light: var(--brand-lavender-light);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--brand-ivory);
+  color: var(--brand-ink);
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Scrollbar: gold thumb on ivory track */
+::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--brand-ivory);
+}
+::-webkit-scrollbar-thumb {
+  background: #F7B90099;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--brand-gold);
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Primary button: solid gold with deep plum text, flat minimalist radius */
+.btn-primary {
+  background: var(--brand-gold);
+  color: var(--brand-ink);
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 0.7rem 1.6rem;
+  border: none;
+  font-family: var(--font-body);
+  transition: background 0.15s ease;
+  cursor: pointer;
+}
+.btn-primary:hover {
+  background: var(--brand-gold-dark);
+}
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Secondary button: kept as an alias so existing btn-secondary references still resolve */
+.btn-secondary {
+  background: var(--brand-ivory);
+  color: var(--brand-ink);
+  font-weight: 500;
+  border-radius: 4px;
+  padding: 0.7rem 1.6rem;
+  border: 1px solid var(--brand-border);
+  font-family: var(--font-body);
+  transition: background 0.15s ease, border-color 0.15s ease;
+  cursor: pointer;
+}
+.btn-secondary:hover {
+  background: var(--brand-lavender-light);
+  border-color: var(--brand-purple);
+}
+
+/* Outline button: purple border, flips to solid purple on hover */
+.btn-outline {
+  border: 1px solid var(--brand-purple);
+  color: var(--brand-purple);
+  font-weight: 500;
+  border-radius: 4px;
+  padding: 0.65rem 1.5rem;
+  background: var(--brand-ivory);
+  font-family: var(--font-body);
+  transition: background 0.15s ease, color 0.15s ease;
+  cursor: pointer;
+}
+.btn-outline:hover {
+  background: var(--brand-purple);
+  color: var(--brand-ivory);
+}
+
+/* Soft secondary button (lavender-wash fill) */
+.btn-gold {
+  background: var(--brand-lavender-light);
+  color: var(--brand-purple);
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 0.7rem 1.6rem;
+  border: 1px solid var(--brand-border);
+  font-family: var(--font-body);
+  transition: background 0.15s ease;
+  cursor: pointer;
+}
+.btn-gold:hover {
+  background: var(--brand-lavender);
+}
+
+/* Section title */
+.section-title {
+  font-family: var(--font-display);
+  color: var(--brand-purple);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Card */
+.card-soft {
+  background: var(--brand-ivory);
+  border-radius: 6px;
+  border: 1px solid var(--brand-lavender-light);
+  box-shadow: none;
+  transition: border-color 0.15s ease;
+}
+.card-soft:hover {
+  border-color: var(--brand-border);
+}
+
+/* Subtle divider: use as <div class="gold-divider"> */
+.gold-divider {
+  height: 1px;
+  background: var(--brand-lavender);
+  margin: 0.75rem 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
