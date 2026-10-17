@@ -1,13 +1,27 @@
 export default function robots() {
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.tirupurclothinghub.com';
+  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.purplequeen.in').replace(/\/+$/, '');
 
   return {
     rules: [
       {
         userAgent: '*',
         allow: '/',
-        // Keep crawlers off admin, API, and endless cart/checkout/filter URLs
-        disallow: ['/admin', '/api', '/cart', '/checkout', '/*?*sort=', '/*?*filter='],
+        // Keep crawlers off admin, API, private, and endless filter/sort/param URLs
+        disallow: [
+          '/admin',
+          '/api',
+          '/cart',
+          '/checkout',
+          '/account',
+          '/login',
+          '/register',
+          '/wishlist',
+          '/search',
+          '/*?*sort=',
+          '/*?*filter=',
+          '/*?*utm_',
+          '/*?*sessionid=',
+        ],
       },
       {
         // AI training / scraper bots: block entirely to save function invocations
@@ -16,5 +30,6 @@ export default function robots() {
       },
     ],
     sitemap: `${siteUrl}/sitemap.xml`,
+    host: siteUrl,
   };
 }

@@ -22,6 +22,12 @@ const body = Poppins({
   display: 'swap',
 });
 
+const SITE_NAME = 'Purple Queen';
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.purplequeen.in').replace(/\/+$/, '');
+const DEFAULT_TITLE = 'Purple Queen | Women Kurtis, Nighties & Innerwear Online';
+const DEFAULT_DESCRIPTION =
+  'Shop women’s kurtis, nighties, innerwear and trending ethnic wear online at Purple Queen. Quality fabrics, latest designs, easy returns and fast delivery across India.';
+
 // Cached for 1 hour. Call revalidateTag('settings') after saving settings in admin.
 const getSeoSettings = unstable_cache(
   async () => {
@@ -44,27 +50,113 @@ const getSeoSettings = unstable_cache(
 export async function generateMetadata() {
   const settings = await getSeoSettings();
 
-  const title = settings?.seoTitle || 'Purple Queen- Women Kurtis, Nighties & More';
-  const description =
-    settings?.seoDescription ||
-    'Shop authentic women kurtis, nighties, innerwear and trending collections online from Purple Queen.';
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.tirupurclothinghub.com';
+  const title = settings?.seoTitle || DEFAULT_TITLE;
+  const description = settings?.seoDescription || DEFAULT_DESCRIPTION;
 
   return {
-    title: { default: title, template: '%s | Purple Queen' },
+    metadataBase: new URL(SITE_URL),
+    title: { default: title, template: `%s | ${SITE_NAME}` },
     description,
-    metadataBase: new URL(siteUrl),
-    keywords: ['women kurtis online', 'nighties online', 'innerwear online', 'Purple Queen', 'women fashion'],
-    openGraph: { title, description, siteName: 'Purple Queen', type: 'website' },
-    icons: { icon: '/favicon.ico' },
+    applicationName: SITE_NAME,
+    generator: 'Next.js',
+    authors: [{ name: SITE_NAME, url: SITE_URL }],
+    creator: SITE_NAME,
+    publisher: SITE_NAME,
+    category: 'shopping',
+    keywords: [
+      'women kurtis online',
+      'kurtis for women',
+      'nighties online',
+      'night dress for women',
+      'innerwear online',
+      'ethnic wear for women',
+      'Purple Queen',
+      'women fashion India',
+    ],
+    // NOTE: do NOT set `alternates.canonical` here. A layout-level canonical
+    // would point every page at the homepage. Set it per page in each
+    // page's generateMetadata (e.g. alternates: { canonical: `/product/${slug}` }).
+    formatDetection: { email: false, address: false, telephone: false },
+    openGraph: {
+      title,
+      description,
+      siteName: SITE_NAME,
+      type: 'website',
+      locale: 'en_IN',
+      url: SITE_URL,
+      // Add /app/opengraph-image.jpg (1200x630) and Next will wire it up automatically
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+    },
+    robots: {
+      index: true,
+      follow: true,
+      googleBot: {
+        index: true,
+        follow: true,
+        'max-image-preview': 'large',
+        'max-snippet': -1,
+        'max-video-preview': -1,
+      },
+    },
+    // Add after verifying in Google Search Console / Bing Webmaster
+    // verification: { google: 'YOUR_GOOGLE_CODE', other: { 'msvalidate.01': 'YOUR_BING_CODE' } },
+    icons: {
+      icon: '/favicon.ico',
+      // apple: '/apple-touch-icon.png',
+    },
   };
 }
 
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  themeColor: '#ffffff',
+};
+
+// Site-wide structured data: Organization + WebSite (enables sitelinks / brand knowledge panel)
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'Organization',
+      '@id': `${SITE_URL}/#organization`,
+      name: SITE_NAME,
+      url: SITE_URL,
+      logo: `${SITE_URL}/logo.png`, // make sure this file exists in /public
+      // sameAs: ['https://www.instagram.com/...', 'https://www.facebook.com/...'],
+    },
+    {
+      '@type': 'WebSite',
+      '@id': `${SITE_URL}/#website`,
+      url: SITE_URL,
+      name: SITE_NAME,
+      inLanguage: 'en-IN',
+      publisher: { '@id': `${SITE_URL}/#organization` },
+      // Keep only if you have a /search?q= page
+      // potentialAction: {
+      //   '@type': 'SearchAction',
+      //   target: `${SITE_URL}/search?q={search_term_string}`,
+      //   'query-input': 'required name=search_term_string',
+      // },
+    },
+  ],
+};
+
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
+    <html lang="en-IN">
       {/* background comes from globals.css (white) */}
       <body className={`${display.variable} ${body.variable} font-body antialiased`}>
+        <script
+          type="application/ld+json"
+          // Escape "<" so the JSON can never break out of the script tag
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, '\\u003c') }}
+        />
+
         <CartProvider>
           <WishlistProvider>
             {children}
