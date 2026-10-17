@@ -45,7 +45,8 @@ export default function CartPage() {
         {items.map((item, idx) => {
           const key = cartKey(item);
           const selText = formatSelections(item);
-          const extras = [item.sleeveType, item.zipType].filter(Boolean).join(' · ');
+          const legacy = [item.sleeveType, item.zipType].filter(Boolean).join(' · ');
+          const details = [selText, legacy].filter(Boolean).join(' · ');
           return (
             <div
               key={key}
@@ -63,17 +64,25 @@ export default function CartPage() {
                 <p className="text-xs mt-1" style={{ color: INK_SOFT }}>
                   Color: {item.color} &nbsp;·&nbsp; Size: {item.size}
                 </p>
-                {(selText || extras) && (
-                  <p className="text-xs mt-0.5" style={{ color: INK_SOFT }}>
-                    {[selText, extras].filter(Boolean).join(' · ')}
-                  </p>
+                {details && (
+                  <p className="text-xs mt-0.5" style={{ color: INK_SOFT }}>{details}</p>
                 )}
                 {item.isCombo && item.pieces > 1 && (
                   <p className="text-xs mt-0.5" style={{ color: INK_SOFT }}>
                     {item.pieces} pieces{item.qty > 1 ? ` each · ${item.qty * item.pieces} total` : ''}
                   </p>
                 )}
-                <p className="text-sm mt-1.5" style={{ color: PURPLE }}>{formatINR(item.price)}</p>
+                <p className="text-sm mt-1.5" style={{ color: PURPLE }}>
+                  {formatINR(item.price)}
+                  {item.priceSource === 'discount' && (
+                    <span
+                      className="ml-2 text-[10px] uppercase tracking-wider px-1.5 py-0.5"
+                      style={{ background: WASH, color: PURPLE, borderRadius: '2px' }}
+                    >
+                      Offer price
+                    </span>
+                  )}
+                </p>
 
                 {/* Qty controls + remove */}
                 <div className="flex items-center gap-4 mt-3">

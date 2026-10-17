@@ -44,6 +44,30 @@ function SSRKInput({ placeholder, type = 'text', value, onChange, autoComplete, 
   );
 }
 
+// Same line shape for the stock check and the order APIs, so the server sees
+// exactly what is in the cart (options + price source included).
+function toApiLine(i) {
+  return {
+    productId: i.productId,
+    variantId: i.variantId,
+    size: i.size,
+    qty: i.qty,
+    sleeveType: i.sleeveType || '',
+    zipType: i.zipType || '',
+    // Admin-defined option groups: [{ group, choice }]
+    customSelections: i.customSelections || [],
+    pantOption: i.pantOption,
+    shawlOption: i.shawlOption,
+    // 'discount' only for lines added from the Discounts section; the server
+    // re-checks the discount is live and prices it itself.
+    priceSource: i.priceSource === 'discount' ? 'discount' : 'regular',
+    isCombo: i.isCombo || false,
+    comboId: i.comboId,
+    // Color-pack: server uses packSize + colors to verify pieces, stock and price.
+    ...(i.packDetails ? { packDetails: i.packDetails } : {}),
+  };
+}
+
 export default function CheckoutPage() {
   const { items, subtotal, totalPieces, clearCart, updateQty, removeItem, setItemStock } = useCart();
   const router = useRouter();
@@ -162,6 +186,17 @@ export default function CheckoutPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subtotal]);
 
+  // Shows a server order error. Missing-option errors get a clear next step,
+  // because the fix is on the cart line, not on this page.
+  function showOrderError(message, fallback) {
+    const msg = message || fallback;
+    if (/please select/i.test(msg)) {
+      toast.error(`${msg}. Remove this item from your cart and add it again with all options chosen.`, { duration: 7000 });
+    } else {
+      toast.error(msg, { duration: 5000 });
+    }
+  }
+
   async function validateStockBeforeOrder() {
     setCheckingStock(true);
     try {
@@ -170,20 +205,9 @@ export default function CheckoutPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           items: items.map((i) => ({
-            productId: i.productId,
-            variantId: i.variantId,
-            size: i.size,
-            qty: i.qty,
+            ...toApiLine(i),
             name: i.name,
-            isCombo: i.isCombo || false,
-            comboId: i.comboId,
             packKey: i.packKey,
-            packDetails: i.packDetails,
-            sleeveType: i.sleeveType || '',
-            zipType: i.zipType || '',
-            customSelections: i.customSelections || [],
-            pantOption: i.pantOption,
-            shawlOption: i.shawlOption,
           })),
         }),
       });
@@ -197,20 +221,19 @@ export default function CheckoutPage() {
       if (data.valid) return true;
 
       data.issues.forEach((issue) => {
-        // The server echoes the item back; if it doesn't include customSelections,
-        // fall back to the cart line with the same product/variant/size so the
-        // key matches the cart line exactly.
-        const source = issue.customSelections
-          ? issue
-          : items.find(
-              (i) =>
-                i.productId === issue.productId &&
-                i.variantId === issue.variantId &&
-                i.size === issue.size &&
-                (i.comboId || '') === (issue.comboId || '') &&
-                (i.packKey || '') === (issue.packKey || '')
-            ) || issue;
-        const key = cartKey({ ...issue, customSelections: source.customSelections });
+        // Find the exact cart line this issue is about. Prefer an exact key match;
+        // otherwise match on ids (the server may not echo options back).
+        const exact = items.find((i) => cartKey(i) === cartKey(issue));
+        const loose = items.find(
+          (i) =>
+            (i.productId || '') === (issue.productId || '') &&
+            (i.variantId || '') === (issue.variantId || '') &&
+            (i.size || '') === (issue.size || '') &&
+            (i.comboId || '') === (issue.comboId || '') &&
+            (i.packKey || '') === (issue.packKey || '')
+        );
+        const key = cartKey(exact || loose || issue);
+
         if (issue.reason === 'unavailable' || issue.reason === 'out_of_stock') {
           toast.error(`${issue.name || 'An item'} is out of stock and was removed from your cart`);
           removeItem(key);
@@ -218,6 +241,19 @@ export default function CheckoutPage() {
           toast.error(`Only ${issue.availableStock} left of ${issue.name || 'an item'} — quantity adjusted`);
           updateQty(key, issue.availableStock);
           setItemStock(key, issue.availableStock);
+        } else if (issue.reason === 'options_required') {
+          // Usually an old cart line saved before options existed (or options the admin changed).
+          toast.error(
+            `${issue.name || 'An item'} needs its options selected (like sleeve type). It was removed from your cart. Please add it again.`,
+            { duration: 7000 }
+          );
+          removeItem(key);
+        } else if (issue.reason === 'discount_ended') {
+          toast.error(
+            `The offer on ${issue.name || 'an item'} has ended. It was removed from your cart. Please add it again at the current price.`,
+            { duration: 6000 }
+          );
+          removeItem(key);
         }
       });
 
@@ -231,6 +267,7 @@ export default function CheckoutPage() {
   }
 
   async function placeOrder() {
+    if (submitting) return; // guard against double taps
     if (!form.name || !form.phone || !form.line1 || !form.city || !form.state || !form.pincode) {
       toast.error('Please fill all required fields'); return;
     }
@@ -246,26 +283,16 @@ export default function CheckoutPage() {
       return;
     }
 
-    const orderItems = items.map((i) => ({
-      productId: i.productId,
-      variantId: i.variantId,
-      size: i.size,
-      sleeveType: i.sleeveType || '',
-      zipType: i.zipType || '',
-      // Admin-defined option groups (e.g. "Sleeve Type"). The server validates
-      // required groups and prices these from the database.
-      customSelections: i.customSelections || [],
-      pantOption: i.pantOption,
-      shawlOption: i.shawlOption,
-      qty: i.qty,
-      isCombo: i.isCombo || false,
-      comboId: i.comboId,
-      // Color-pack: server uses packSize + colors to verify pieces, stock and price.
-      ...(i.packDetails ? { packDetails: i.packDetails } : {}),
-    }));
+    const orderItems = items.map(toApiLine);
 
     try {
       if (paymentMethod === 'razorpay') {
+        if (typeof window === 'undefined' || !window.Razorpay) {
+          toast.error('Payment window is still loading. Please try again in a moment.');
+          setSubmitting(false);
+          return;
+        }
+
         // Server recomputes the total (shipping from DB-derived weights
         // and the delivery state) and stashes the order payload so the
         // webhook can create the order even if this tab closes early.
@@ -284,7 +311,7 @@ export default function CheckoutPage() {
         });
         const orderData = await orderRes.json();
         if (!orderRes.ok) {
-          toast.error(orderData.error || 'Payment gateway error');
+          showOrderError(orderData.error, 'Payment gateway error');
           if (orderRes.status === 409) fetchShipping();
           setSubmitting(false);
           return;
@@ -302,36 +329,49 @@ export default function CheckoutPage() {
             // Fast path — if this fails or never runs, the webhook creates
             // the same order server-side. /api/orders is idempotent on
             // razorpayOrderId, so this is always safe to call.
-            const finalRes = await fetch('/api/orders', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                items: orderItems,
-                customer: { name: form.name, phone: form.phone, email: form.email },
-                shippingAddress: form,
-                couponCode: appliedCoupon,
-                paymentMethod: 'razorpay',
-                razorpayOrderId: response.razorpay_order_id,
-                razorpayPaymentId: response.razorpay_payment_id,
-                razorpaySignature: response.razorpay_signature
-              })
-            });
-            const finalData = await finalRes.json();
-            if (finalRes.ok) {
-              clearCart();
-              router.push(`/order-success/${finalData.order._id}`);
-            } else {
-              toast.error(
-                `Payment received — confirming your order. If it doesn't appear shortly, contact support with payment ID ${response.razorpay_payment_id}.`,
-                { duration: 8000 }
-              );
-              clearCart();
-              router.push('/');
+            try {
+              const finalRes = await fetch('/api/orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  items: orderItems,
+                  customer: { name: form.name, phone: form.phone, email: form.email },
+                  shippingAddress: form,
+                  couponCode: appliedCoupon,
+                  paymentMethod: 'razorpay',
+                  razorpayOrderId: response.razorpay_order_id,
+                  razorpayPaymentId: response.razorpay_payment_id,
+                  razorpaySignature: response.razorpay_signature
+                })
+              });
+              const finalData = await finalRes.json();
+              if (finalRes.ok) {
+                clearCart();
+                router.push(`/order-success/${finalData.order._id}`);
+                return;
+              }
+            } catch {
+              // fall through to the "payment received" message below
+            } finally {
+              setSubmitting(false);
             }
-            setSubmitting(false);
+
+            // Money was taken but the fast path failed: the webhook still creates the order.
+            toast.error(
+              `Payment received — confirming your order. If it doesn't appear shortly, contact support with payment ID ${response.razorpay_payment_id}.`,
+              { duration: 8000 }
+            );
+            clearCart();
+            router.push('/');
           },
           modal: { ondismiss: () => setSubmitting(false) }
         });
+
+        rzp.on?.('payment.failed', (resp) => {
+          toast.error(resp?.error?.description || 'Payment failed. Please try again.');
+          setSubmitting(false);
+        });
+
         rzp.open();
       } else {
         const res = await fetch('/api/orders', {
@@ -347,7 +387,7 @@ export default function CheckoutPage() {
         });
         const data = await res.json();
         if (res.ok) { clearCart(); router.push(`/order-success/${data.order._id}`); }
-        else { toast.error(data.error || 'Could not place order'); }
+        else { showOrderError(data.error, 'Could not place order'); }
         setSubmitting(false);
       }
     } catch {

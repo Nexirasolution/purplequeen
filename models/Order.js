@@ -13,7 +13,19 @@ const AddonSelectionSchema = new mongoose.Schema(
   { _id: false }
 );
 
-// Snapshot of a color-pack's contents (pack size + how many of each color).
+// Snapshot of an admin-defined option pick (e.g. Sleeve Type: Full Sleeve).
+// FIX: this was missing from the schema, so Mongoose silently dropped
+// `customSelections` and orders were saved without the customer's choices.
+const CustomSelectionSchema = new mongoose.Schema(
+  {
+    group: { type: String, default: '' },
+    choice: { type: String, default: '' },
+    price: { type: Number, default: 0 }
+  },
+  { _id: false }
+);
+
+// Snapshot of a color-pack's contents (pack size + how many of each color/size).
 const PackDetailsSchema = new mongoose.Schema(
   {
     packSize: { type: Number },
@@ -22,6 +34,8 @@ const PackDetailsSchema = new mongoose.Schema(
       {
         _id: false,
         name: { type: String },
+        // FIX: size was missing, so the per-color size was dropped on save.
+        size: { type: String, default: '' },
         qty: { type: Number }
       }
     ]
@@ -39,14 +53,19 @@ const OrderItemSchema = new mongoose.Schema(
     image: String,
     color: String,
     size: String,
+    // Legacy fixed options (old products)
     sleeveType: { type: String, default: '' },
     zipType: { type: String, default: '' },
+    // Admin-defined option groups picked by the customer
+    customSelections: { type: [CustomSelectionSchema], default: [] },
     // null when the customer picked "None" (no pant / no shawl)
     pantOption: { type: AddonSelectionSchema, default: null },
     shawlOption: { type: AddonSelectionSchema, default: null },
     // Only set for color-pack combo lines
     packDetails: { type: PackDetailsSchema, default: null },
-    price: Number, // unit price INCLUDING pant/shawl add-on prices
+    price: Number, // unit price INCLUDING pant/shawl add-ons and option extras
+    // FIX: priceSource was missing, so it was dropped on save.
+    priceSource: { type: String, enum: ['regular', 'discount'], default: 'regular' },
     qty: Number
   },
   { _id: false }
@@ -95,5 +114,12 @@ const OrderSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// In dev, Next.js hot-reload keeps Mongoose's model registry alive across saves,
+// so schema changes are silently ignored until the server restarts. Force a
+// fresh compile outside production (same pattern as the Product model).
+if (process.env.NODE_ENV !== 'production' && mongoose.models.Order) {
+  delete mongoose.models.Order;
+}
 
 export default mongoose.models.Order || mongoose.model('Order', OrderSchema);
