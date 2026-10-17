@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { revalidateTag } from 'next/cache';
+import { revalidateTag, revalidatePath } from 'next/cache';
 import { dbConnect } from '@/lib/mongodb';
 import Product from '@/models/Product';
 import Category from '@/models/Category';
@@ -11,9 +11,11 @@ import { generateSku } from '@/lib/sku';
 import { computeBasePrice } from '@/lib/pricing';
 import { sanitizeFreeShipping } from '@/lib/freeShipping';
 import { sanitizeOptionGroups } from '@/lib/optionGroups';
+import { sanitizeDiscount, liveDiscountQuery } from '@/lib/discount';
 
 // GET /api/products?category=slug&size=M&minPrice=0&maxPrice=2000&sort=newest&page=1&limit=20&flag=bestseller
 // Pass limit=all to skip pagination entirely and return every matching product.
+// flag=discount returns only products whose discount is live right now.
 export async function GET(req) {
   try {
     await dbConnect();
@@ -44,11 +46,12 @@ export async function GET(req) {
       if (maxPrice) query.basePrice.$lte = Number(maxPrice);
     }
 
-    const flag = searchParams.get('flag'); // bestseller | topseller | active | featured | newarrival
+    const flag = searchParams.get('flag'); // bestseller | topseller | active | featured | newarrival | discount
     if (flag === 'bestseller') query.isBestSeller = true;
     if (flag === 'topseller') query.isTopSeller = true;
     if (flag === 'active') query.isActiveSeller = true;
     if (flag === 'featured') query.isFeatured = true;
+    if (flag === 'discount') Object.assign(query, liveDiscountQuery());
 
     // "New Arrivals" fallback: 30 days -> 90 days -> no date filter.
     if (flag === 'newarrival') {
@@ -121,6 +124,9 @@ export const POST = requireAdmin(async (req) => {
     // Clean freeShipping / freeShippingStates coming from the admin form
     sanitizeFreeShipping(body);
 
+    // Clean discount block (only if the form sent one)
+    sanitizeDiscount(body);
+
     // Clean admin-defined option groups (types + choices + extra prices)
     body.optionGroups = sanitizeOptionGroups(body.optionGroups);
 
@@ -139,6 +145,8 @@ export const POST = requireAdmin(async (req) => {
     const product = await Product.create({ ...body, slug, sku, basePrice, weight });
 
     revalidateTag('products');
+    revalidatePath('/');
+    revalidatePath('/discounts');
     return NextResponse.json({ product }, { status: 201 });
   } catch (err) {
     console.error('POST /api/products error:', err);

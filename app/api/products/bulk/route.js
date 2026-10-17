@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { revalidateTag } from 'next/cache';
+import { revalidateTag, revalidatePath } from 'next/cache';
 import { dbConnect } from '@/lib/mongodb';
 import Product from '@/models/Product';
 import Category from '@/models/Category';
@@ -8,6 +8,7 @@ import { requireAdmin } from '@/lib/apiAuth';
 import { computeBasePrice } from '@/lib/pricing';
 import { sanitizeFreeShipping } from '@/lib/freeShipping';
 import { sanitizeOptionGroups } from '@/lib/optionGroups';
+import { sanitizeDiscount } from '@/lib/discount';
 
 // POST /api/products/bulk
 // body: {
@@ -20,12 +21,14 @@ import { sanitizeOptionGroups } from '@/lib/optionGroups';
 //   zipOptions: [ 'With Zip' | 'Without Zip', ... ],                                        // legacy
 //   freeShipping: boolean,            // free in every state
 //   freeShippingStates: [ 'Kerala' ]  // free only in these states
+//   discount: { isActive, type: 'percent' | 'flat', value, startsAt, endsAt }  // optional
 // }
 // Creates ONE product per image.
 // - Title = auto-derived from the CATEGORY name + zero-padded number.
 // - SKU = admin-typed short code + zero-padded number.
 // - Each size may carry its own optional `price`; blank/0 => the default `price` is used.
-// - isReadyToShip / sizeChart / optionGroups / sleeveOptions / zipOptions / free shipping apply to every product in the batch.
+// - isReadyToShip / sizeChart / optionGroups / sleeveOptions / zipOptions / free shipping / discount
+//   apply to every product in the batch.
 export const POST = requireAdmin(async (req) => {
   try {
     await dbConnect();
@@ -54,6 +57,12 @@ export const POST = requireAdmin(async (req) => {
       freeShipping: body.freeShipping,
       freeShippingStates: body.freeShippingStates || [],
     });
+
+    // Clean the discount block (same rules as single-product create/update).
+    // Left undefined when the form didn't send one, so the schema default
+    // (discount off) applies.
+    sanitizeDiscount(body);
+    const discount = body.discount;
 
     if (!category) {
       return NextResponse.json({ error: 'Category is required' }, { status: 400 });
@@ -198,6 +207,8 @@ export const POST = requireAdmin(async (req) => {
           zipOptions: zipOptionsClean,
           freeShipping: !!freeShipping,
           freeShippingStates: freeShipping ? [] : (freeShippingStates || []),
+          // Same discount for every product in the batch (omitted => discount off)
+          ...(discount ? { discount } : {}),
         });
 
         created.push({ id: product._id, name: product.name, sku: product.sku });
@@ -206,7 +217,11 @@ export const POST = requireAdmin(async (req) => {
       }
     }
 
-    if (created.length) revalidateTag('products'); // storefront shows new products immediately
+    if (created.length) {
+      revalidateTag('products'); // storefront shows new products immediately
+      revalidatePath('/');
+      revalidatePath('/discounts');
+    }
 
     return NextResponse.json(
       { createdCount: created.length, created, errors },

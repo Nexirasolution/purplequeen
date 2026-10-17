@@ -1,30 +1,32 @@
-// Cloudinary delivers from res.cloudinary.com/<cloud_name>/...
-// Set CLOUDINARY_CLOUD_NAME (Vercel + .env.local) to lock the pattern to your account.
+// Images are compressed to WebP in the browser before upload and served from
+// Cloudflare R2, so Vercel does NOT need to optimize them. `unoptimized: true`
+// turns off Next's image optimizer (no /_next/image calls, no Vercel image usage).
+// Set R2_PUBLIC_URL (e.g. https://cdn.example.com) in .env.local and Vercel env vars.
+const r2Host = (() => {
+  try {
+    return new URL(process.env.R2_PUBLIC_URL || '').hostname;
+  } catch {
+    return null;
+  }
+})();
+
+// Old product images may still point to Cloudinary. They keep loading as-is.
 const cloudName = process.env.CLOUDINARY_CLOUD_NAME || process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   images: {
+    unoptimized: true,
+
+    // Not used while unoptimized, but keeps next/image happy if you turn optimization back on.
     remotePatterns: [
+      ...(r2Host ? [{ protocol: 'https', hostname: r2Host, pathname: '/**' }] : []),
       {
         protocol: 'https',
         hostname: 'res.cloudinary.com',
         pathname: cloudName ? `/${cloudName}/**` : '/**',
       },
     ],
-
-    // WebP only: AVIF is much more CPU-heavy to encode
-    formats: ['image/webp'],
-
-    // Fewer sizes = fewer generated variants = fewer transformations
-    deviceSizes: [640, 828, 1200],
-    imageSizes: [64, 128, 256],
-
-    // Qualities used in the code: 75 (main images) and 50 (thumbnails)
-    qualities: [50, 75],
-
-    // Cache optimized images for 1 year (default is 60s)
-    minimumCacheTTL: 31536000,
   },
 
   eslint: { ignoreDuringBuilds: true },

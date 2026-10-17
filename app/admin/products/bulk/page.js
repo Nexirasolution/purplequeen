@@ -5,6 +5,9 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { X, UploadCloud, Loader2, Plus, Upload } from 'lucide-react';
 import { INDIAN_STATES } from '@/lib/indianStates';
+import { uploadFile } from '@/lib/uploadFile';
+import { applyDiscount } from '@/lib/discount';
+import { formatINR } from '@/lib/utils';
 
 export default function BulkAddProductsPage() {
   const router = useRouter();
@@ -23,6 +26,13 @@ export default function BulkAddProductsPage() {
 
   // Applies to every product created in this batch
   const [isReadyToShip, setIsReadyToShip] = useState(false);
+
+  // Discount for every product in this batch (shown in the Discounts section only)
+  const [discountOn, setDiscountOn] = useState(false);
+  const [discountType, setDiscountType] = useState('percent'); // 'percent' | 'flat'
+  const [discountValue, setDiscountValue] = useState('');
+  const [discountStarts, setDiscountStarts] = useState('');
+  const [discountEnds, setDiscountEnds] = useState('');
 
   // Free shipping for every product in this batch: 'off' | 'all' | 'states'
   const [shipMode, setShipMode] = useState('off');
@@ -43,6 +53,7 @@ export default function BulkAddProductsPage() {
   const [files, setFiles] = useState([]); // File[]
   const [previews, setPreviews] = useState([]); // objectURL[]
   const [submitting, setSubmitting] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState(''); // "Uploading image 3 of 12"
   const [result, setResult] = useState(null);
 
   useEffect(() => {
@@ -108,15 +119,6 @@ export default function BulkAddProductsPage() {
     setManualSizes((prev) => prev.filter((s) => s.size !== name));
   }
 
-  async function uploadImage(file) {
-    const formData = new FormData();
-    formData.append('file', file);
-    const res = await fetch('/api/upload', { method: 'POST', body: formData });
-    if (!res.ok) throw new Error(`Failed to upload ${file.name}`);
-    const data = await res.json();
-    return data.url;
-  }
-
   async function handleSizeChartFilesChange(e) {
     const selected = Array.from(e.target.files || []);
     if (selected.length === 0) return;
@@ -125,8 +127,8 @@ export default function BulkAddProductsPage() {
     try {
       const uploaded = [];
       for (const file of selected) {
-        const url = await uploadImage(file);
-        uploaded.push(url);
+        // Compressed to WebP in the browser, then sent straight to Cloudflare R2
+        uploaded.push(await uploadFile(file, 'sizecharts'));
       }
       setSizeChart((prev) => [...prev, ...uploaded]);
       toast.success(`${uploaded.length} size chart image${uploaded.length > 1 ? 's' : ''} uploaded`);
@@ -145,6 +147,23 @@ export default function BulkAddProductsPage() {
   // blank / 0 => null => the default price is used for that size
   const toSizePrice = (v) => (v === '' || v == null || Number(v) <= 0 ? null : Number(v));
 
+  // Preview: lowest price in the batch (default price or any per-size price) -> offer price
+  const previewBase = (() => {
+    const prices = [Number(price) || 0];
+    const perSize = [
+      ...Object.values(priceBySize),
+      ...manualSizes.map((s) => s.price),
+    ]
+      .map((v) => Number(v))
+      .filter((v) => v > 0);
+    const all = [...perSize, ...(Number(price) > 0 ? prices : [])].filter((v) => v > 0);
+    return all.length ? Math.min(...all) : 0;
+  })();
+  const discountPreview =
+    previewBase > 0 && Number(discountValue) > 0
+      ? applyDiscount(previewBase, { type: discountType, value: Number(discountValue) })
+      : null;
+
   async function handleSubmit(e) {
     e.preventDefault();
     setResult(null);
@@ -155,6 +174,19 @@ export default function BulkAddProductsPage() {
     if (files.length === 0) return toast.error('Add at least one image');
     if (shipMode === 'states' && freeStates.length === 0) {
       return toast.error('Select at least one state for free shipping, or choose another option');
+    }
+
+    // Discount validation (only when switched on)
+    if (discountOn) {
+      if (!(Number(discountValue) > 0)) {
+        return toast.error('Enter a discount value, or switch the discount off');
+      }
+      if (discountType === 'percent' && Number(discountValue) > 95) {
+        return toast.error('Percent discount can be at most 95%');
+      }
+      if (discountStarts && discountEnds && new Date(discountEnds) <= new Date(discountStarts)) {
+        return toast.error('Discount end time must be after the start time');
+      }
     }
 
     // Combine predefined-size stock/price and manually-added sizes
@@ -179,12 +211,18 @@ export default function BulkAddProductsPage() {
 
     setSubmitting(true);
     try {
-      // 1. Upload every image first, one product will be created per URL
+      // 1. Compress + upload every image first (browser -> Cloudflare R2),
+      //    one product will be created per URL
       const imageUrls = [];
-      for (const file of files) {
-        const url = await uploadImage(file);
-        imageUrls.push(url);
+      for (let i = 0; i < files.length; i++) {
+        setUploadStatus(`Uploading image ${i + 1} of ${files.length}…`);
+        try {
+          imageUrls.push(await uploadFile(files[i], 'products'));
+        } catch (err) {
+          throw new Error(`Failed to upload ${files[i].name}: ${err.message}`);
+        }
       }
+      setUploadStatus('Creating products…');
 
       // 2. Create products in bulk
       const res = await fetch('/api/products/bulk', {
@@ -206,6 +244,15 @@ export default function BulkAddProductsPage() {
           zipOptions,
           freeShipping: shipMode === 'all',
           freeShippingStates: shipMode === 'states' ? freeStates : [],
+          // Same discount for every product in the batch. Dates go as ISO (UTC)
+          // so the server doesn't misread the admin's local time.
+          discount: {
+            isActive: discountOn,
+            type: discountType,
+            value: discountOn ? Number(discountValue) || 0 : 0,
+            startsAt: discountOn && discountStarts ? new Date(discountStarts).toISOString() : null,
+            endsAt: discountOn && discountEnds ? new Date(discountEnds).toISOString() : null,
+          },
         }),
       });
 
@@ -229,6 +276,7 @@ export default function BulkAddProductsPage() {
       toast.error(err.message || 'Something went wrong');
     } finally {
       setSubmitting(false);
+      setUploadStatus('');
     }
   }
 
@@ -301,6 +349,82 @@ export default function BulkAddProductsPage() {
               className="w-full px-3 py-2 text-sm rounded-lg border border-brand-ink/10 outline-none"
             />
           </div>
+        </div>
+
+        {/* Discount: the offer price is used only when a customer buys from the
+            Discounts section. Normal pages keep showing the original price. */}
+        <div className="border border-brand-ink/10 rounded-lg p-3">
+          <label className="flex items-center gap-2 text-sm font-medium cursor-pointer w-fit">
+            <input
+              type="checkbox"
+              checked={discountOn}
+              onChange={(e) => setDiscountOn(e.target.checked)}
+              className="w-4 h-4"
+            />
+            Add every product in this batch to the Discounts section
+          </label>
+          <p className="text-xs text-brand-ink/40 mt-1">
+            The offer price shows only in the Discounts section. Product and category pages keep the original price,
+            and both sell from the same stock.
+          </p>
+
+          {discountOn && (
+            <>
+              <div className="grid sm:grid-cols-4 gap-3 mt-3">
+                <div>
+                  <label className="block text-xs text-brand-ink/50 mb-1">Type</label>
+                  <select
+                    value={discountType}
+                    onChange={(e) => setDiscountType(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-brand-ink/10 outline-none"
+                  >
+                    <option value="percent">Percent (% off)</option>
+                    <option value="flat">Flat (₹ off)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-brand-ink/50 mb-1">
+                    {discountType === 'percent' ? 'Percent off' : 'Rupees off'}
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={discountValue}
+                    onChange={(e) => setDiscountValue(e.target.value)}
+                    placeholder={discountType === 'percent' ? 'e.g. 20' : 'e.g. 150'}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-brand-ink/10 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-brand-ink/50 mb-1">Starts (optional)</label>
+                  <input
+                    type="datetime-local"
+                    value={discountStarts}
+                    onChange={(e) => setDiscountStarts(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-brand-ink/10 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-brand-ink/50 mb-1">Ends (optional)</label>
+                  <input
+                    type="datetime-local"
+                    value={discountEnds}
+                    onChange={(e) => setDiscountEnds(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-brand-ink/10 outline-none"
+                  />
+                </div>
+              </div>
+
+              {discountPreview != null && (
+                <p className="text-sm mt-3">
+                  Lowest price: {formatINR(previewBase)} → <b>{formatINR(discountPreview)}</b> in the Discounts section
+                </p>
+              )}
+              <p className="text-xs text-brand-ink/40 mt-1">
+                Applies to the size/variant price only. Leave start and end empty to run it until you switch it off.
+              </p>
+            </>
+          )}
         </div>
 
         <div>
@@ -604,7 +728,9 @@ export default function BulkAddProductsPage() {
 
         <button type="submit" disabled={submitting} className="btn-primary flex items-center gap-2 text-sm disabled:opacity-60">
           {submitting && <Loader2 size={16} className="animate-spin" />}
-          {submitting ? 'Creating products...' : `Create ${files.length || ''} Product${files.length === 1 ? '' : 's'}`}
+          {submitting
+            ? uploadStatus || 'Creating products...'
+            : `Create ${files.length || ''} Product${files.length === 1 ? '' : 's'}`}
         </button>
       </form>
 

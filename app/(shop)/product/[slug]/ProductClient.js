@@ -8,6 +8,7 @@ import dynamic from 'next/dynamic';
 import { Star, ShoppingBag, Zap, Heart, Share2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatINR } from '@/lib/utils';
 import { getSizeStock, getCombinedStock } from '@/lib/stock';
+import { applyDiscount, isDiscountLive } from '@/lib/discount';
 import { useCart } from '@/components/CartContext';
 import { useWishlist } from '@/components/WhishlistContext';
 import ColorSizeSelector from '@/components/ColorSizeSelector';
@@ -59,11 +60,22 @@ export default function ProductClient({ data }) {
   const [lightboxImg, setLightboxImg] = useState(null);
   const [sizeChartOpen, setSizeChartOpen] = useState(false);
   const [paused, setPaused] = useState(false);
+  // true when the customer opened this page from the Discounts section (?src=discount).
+  // Read from the URL in the browser so the product page itself stays cacheable.
+  const [fromDiscount, setFromDiscount] = useState(false);
 
   // Same id the product cards use, so the heart state matches everywhere
   const wished = isWishlisted(product._id);
 
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    setMounted(true);
+    setFromDiscount(new URLSearchParams(window.location.search).get('src') === 'discount');
+  }, []);
+
+  // Offer price only when they came from the Discounts section AND the discount is still live.
+  // Everywhere else the original price is used.
+  const useDiscount = fromDiscount && isDiscountLive(product);
+  const priceSource = useDiscount ? 'discount' : 'regular';
 
   const images = activeVariant?.images || [];
   // Per-size pricing: a size may have its own price, otherwise the variant price applies.
@@ -74,10 +86,14 @@ export default function ProductClient({ data }) {
   const pricesVary = sizePrices.some((p) => p !== sizePrices[0]);
   // Before a size is picked, show the lowest price with a "From" label
   const showFrom = !selectedSizeObj && pricesVary;
-  const currentBasePrice = selectedSizeObj
+  const regularBasePrice = selectedSizeObj
     ? sizeEffectivePrice(selectedSizeObj)
     : pricesVary ? Math.min(...sizePrices) : variantPrice;
-  const compareBase = activeVariant?.compareAtPrice > currentBasePrice ? activeVariant.compareAtPrice : 0;
+  const currentBasePrice = useDiscount ? applyDiscount(regularBasePrice, product.discount) : regularBasePrice;
+  // With the offer on, the struck-through price is the original price.
+  const compareBase = useDiscount
+    ? (regularBasePrice > currentBasePrice ? regularBasePrice : 0)
+    : (activeVariant?.compareAtPrice > currentBasePrice ? activeVariant.compareAtPrice : 0);
   const discount = compareBase ? Math.round(((compareBase - currentBasePrice) / compareBase) * 100) : 0;
 
   // Product's own size chart wins; otherwise fall back to the category's.
@@ -109,6 +125,7 @@ export default function ProductClient({ data }) {
   );
   const customExtra = customSelections.reduce((sum, s) => sum + s.price, 0);
 
+  // Add-ons and custom options are never discounted: they're added at full price.
   const addonTotal = (selectedPant?.price || 0) + (selectedShawl?.price || 0) + customExtra;
   const unitPrice = currentBasePrice + addonTotal;
   const unitCompareAtPrice = compareBase ? compareBase + addonTotal : 0;
@@ -172,10 +189,12 @@ export default function ProductClient({ data }) {
   }
 
   function handleShare() {
+    // Share the plain product link, not the ?src=discount one
+    const url = `${window.location.origin}${window.location.pathname}`;
     if (navigator.share) {
-      navigator.share({ title: product.name, url: window.location.href }).catch(() => {});
+      navigator.share({ title: product.name, url }).catch(() => {});
     } else {
-      navigator.clipboard.writeText(window.location.href);
+      navigator.clipboard.writeText(url);
       toast.success('Link copied!');
     }
   }
@@ -230,6 +249,9 @@ export default function ProductClient({ data }) {
         ? { id: selectedShawl._id, name: selectedShawl.name, price: selectedShawl.price, image: selectedShawl.image, sku: selectedShawl.sku }
         : null,
       price: unitPrice,
+      // 'discount' = bought through the Discounts section. The server re-checks that
+      // the discount is still live and recalculates the price itself.
+      priceSource,
       weight: product.weight || 0, // grams per piece
       qty,
       stock,
@@ -435,6 +457,11 @@ export default function ProductClient({ data }) {
                 </span>
               )}
             </div>
+            {useDiscount && (
+              <p className="text-xs mt-1 font-medium" style={{ color: PURPLE }}>
+                Discount offer price
+              </p>
+            )}
             {addonTotal > 0 && (
               <p className="text-xs mt-1" style={{ color: INK_SOFT }}>
                 Includes {formatINR(addonTotal)} for selected options

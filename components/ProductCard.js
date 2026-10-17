@@ -10,7 +10,7 @@ import { getVariantTotalStock } from '@/lib/stock';
 import { useWishlist } from '@/components/WhishlistContext'; // adjust path as needed
 
 // Loaded only when a customer actually taps "Notify me" (keeps the grid light)
-const NotifyMeModal = dynamic(() => import('@/components/NotifyMeModal'), { ssr: false });
+const NotifyMeModal = dynamic(() => import('@/components/Notifymemodal'), { ssr: false });
 
 const PURPLE = '#4B087A';
 const GOLD = '#F7B900';
@@ -25,10 +25,18 @@ const pillBase = { padding: '6px 14px', borderRadius: '999px' };
 function ProductCard({ product, priority = false }) {
   const variant = product.variants?.[0];
   const image = variant?.images?.[0] || '/placeholder.png';
-  const price = product.basePrice || variant?.price || 0;
-  const compareAt = variant?.compareAtPrice || 0;
+
+  // Discount section: toCardProduct(p, { discount: true }) adds `discountPrice`
+  // and an `href` ending in ?src=discount. Every other page leaves both empty,
+  // so the card shows the original price there.
+  const regularPrice = product.basePrice || variant?.price || 0;
+  const isDiscount = product.discountPrice != null && product.discountPrice < regularPrice;
+  const price = isDiscount ? product.discountPrice : regularPrice;
+  const compareAt = isDiscount ? regularPrice : (variant?.compareAtPrice || 0);
   const hasOffer = compareAt > price;
   const discountPct = hasOffer ? Math.round(((compareAt - price) / compareAt) * 100) : 0;
+
+  const productHref = product.href || `/product/${product.slug}`;
 
   const totalStock = getVariantTotalStock(variant);
   const outOfStock = totalStock <= 0;
@@ -67,7 +75,7 @@ function ProductCard({ product, priority = false }) {
         />
       </button>
 
-      <Link href={`/product/${product.slug}`} prefetch={false} className="block">
+      <Link href={productHref} prefetch={false} className="block">
         <div className="relative aspect-[3/4] overflow-hidden" style={{ background: WASH }}>
           <Image
             src={image}
@@ -90,7 +98,7 @@ function ProductCard({ product, priority = false }) {
               </span>
             ) : discountPct > 0 ? (
               <span className="text-xs font-semibold uppercase tracking-wider" style={{ ...pillBase, color: INK, background: GOLD }}>
-                Sale
+                {isDiscount ? 'Offer' : 'Sale'}
               </span>
             ) : null}
           </div>

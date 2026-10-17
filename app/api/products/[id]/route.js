@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { revalidateTag } from 'next/cache';
+import { revalidateTag, revalidatePath } from 'next/cache';
 import { dbConnect } from '@/lib/mongodb';
 import Product from '@/models/Product';
 import { requireAdmin } from '@/lib/apiAuth';
@@ -7,6 +7,7 @@ import { getProductPageData, getFilter } from '@/lib/products';
 import { computeBasePrice } from '@/lib/pricing';
 import { sanitizeFreeShipping } from '@/lib/freeShipping';
 import { sanitizeOptionGroups } from '@/lib/optionGroups';
+import { sanitizeDiscount } from '@/lib/discount';
 
 // Admin read (?admin=1): always fresh, includes inactive products, and the
 // category stays a plain id so the edit form can post it back safely.
@@ -53,6 +54,10 @@ export const PUT = requireAdmin(async (req, { params }) => {
   // Clean freeShipping / freeShippingStates (updates skip schema validators)
   sanitizeFreeShipping(body);
 
+  // Clean discount block. Only touched when the request actually sends it, so
+  // partial updates (e.g. the inventory page saving stock) never wipe it.
+  sanitizeDiscount(body);
+
   // Clean admin-defined option groups (updates skip schema validators).
   // Only touched when the request actually sends them, so partial updates
   // (e.g. the inventory page saving stock) never wipe a product's options.
@@ -64,11 +69,13 @@ export const PUT = requireAdmin(async (req, { params }) => {
 
   // Persists whatever is on body (sizeChart / isReadyToShip / sleeveOptions /
   // zipOptions / optionGroups / pantOptions / shawlOptions / freeShipping /
-  // freeShippingStates) as long as the schema defines them.
+  // freeShippingStates / discount) as long as the schema defines them.
   const product = await Product.findOneAndUpdate(getFilter(id), body, { new: true });
   if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
 
   revalidateTag('products'); // storefront shows the edit immediately
+  revalidatePath('/');
+  revalidatePath('/discounts');
   return NextResponse.json({ product });
 });
 
@@ -78,5 +85,7 @@ export const DELETE = requireAdmin(async (req, { params }) => {
   await Product.findOneAndDelete(getFilter(id));
 
   revalidateTag('products');
+  revalidatePath('/');
+  revalidatePath('/discounts');
   return NextResponse.json({ success: true });
 });

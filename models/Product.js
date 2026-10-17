@@ -57,6 +57,21 @@ const OptionGroupSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Optional promotional discount. It is ONLY applied when the customer buys
+// through the Discounts section (cart line priceSource = 'discount').
+// Normal product pages, category pages and listings always show the original
+// price. Stock is NOT duplicated: both prices sell from the same variant stock.
+const DiscountSchema = new mongoose.Schema(
+  {
+    isActive: { type: Boolean, default: false },
+    type: { type: String, enum: ['percent', 'flat'], default: 'percent' },
+    value: { type: Number, default: 0, min: 0 }, // % off, or ₹ off per unit
+    startsAt: { type: Date, default: null },
+    endsAt: { type: Date, default: null }
+  },
+  { _id: false }
+);
+
 const ProductSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
@@ -98,6 +113,10 @@ const ProductSchema = new mongoose.Schema(
 
     // Lowest price across all variants AND sizes (used for listing/sorting).
     basePrice: { type: Number, required: true },
+
+    // Discount-section pricing (see lib/discount.js)
+    discount: { type: DiscountSchema, default: () => ({}) },
+
     rating: { type: Number, default: 0 },
     reviewCount: { type: Number, default: 0 },
     isBestSeller: { type: Boolean, default: false },
@@ -116,10 +135,11 @@ ProductSchema.index({ name: 'text', description: 'text', tags: 'text' });
 ProductSchema.index({ isActive: 1, category: 1, createdAt: -1 });
 ProductSchema.index({ isActive: 1, basePrice: 1 });
 ProductSchema.index({ 'variants.sizes.size': 1 });
+ProductSchema.index({ 'discount.isActive': 1, isActive: 1 });
 
 // In dev, Next.js hot-reload keeps Mongoose's model registry alive across
-// saves, so schema changes (like adding `weight`) are silently ignored until
-// the server restarts. Force a fresh compile outside production.
+// saves, so schema changes (like adding `weight` or `discount`) are silently
+// ignored until the server restarts. Force a fresh compile outside production.
 if (process.env.NODE_ENV !== 'production' && mongoose.models.Product) {
   delete mongoose.models.Product;
 }

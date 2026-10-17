@@ -15,14 +15,16 @@ import ReelsSection from '@/components/ReelsSection';
 import Link from 'next/link';
 import { formatINR } from '@/lib/utils';
 import { toCardProduct } from '@/lib/cardProduct';
+import { liveDiscountQuery } from '@/lib/discount';
 import { ArrowRight, Tag } from 'lucide-react';
 
 // ISR: the page is built once and served from the CDN, then regenerated in the
 // background at most every 10 minutes. Visitors and bots no longer trigger a
-// function + 7 DB queries on every request. (Replaces `force-dynamic`.)
+// function + DB queries on every request. (Replaces `force-dynamic`.)
 // The admin settings API calls revalidatePath('/') on save, so live-link changes
-// show instantly. For other admin changes (products, banners, categories, combos,
-// reels, reviews) call revalidatePath('/') in those API routes as well.
+// show instantly. The product API routes also call revalidatePath('/') so
+// discount changes show instantly. For other admin changes (banners,
+// categories, combos, reels, reviews) call revalidatePath('/') in those API routes as well.
 export const revalidate = 600;
 
 // Design tokens: shared purple / gold / ivory theme
@@ -47,17 +49,25 @@ const FONT_SERIF = "Georgia, 'Times New Roman', serif";
 // Featured Collection shows a teaser, not the full catalog
 const FEATURED_LIMIT = 6;
 
+// Discount Offers teaser on the homepage (full list lives at /discounts)
+const DISCOUNT_LIMIT = 4;
+
 // How many reels to show in the "Shop by Reels" row
 const REELS_LIMIT = 10;
 
 async function getData() {
   await dbConnect();
   // Only fetch what the page actually renders.
-  const [banners, newArrivals, reviews, combos, categories, reels, settings] = await Promise.all([
+  const [banners, newArrivals, discountProducts, reviews, combos, categories, reels, settings] = await Promise.all([
     Banner.find({ isActive: true }).sort({ sortOrder: 1 }).lean(),
     Product.find({ isActive: true, isActiveSeller: true })
       .sort({ createdAt: -1 })
       .limit(FEATURED_LIMIT)
+      .lean(),
+    // Products whose discount is live right now (shown with the offer price)
+    Product.find({ isActive: true, ...liveDiscountQuery() })
+      .sort({ createdAt: -1 })
+      .limit(DISCOUNT_LIMIT)
       .lean(),
     Review.find({ isApproved: true, isFeatured: true }).populate('product', 'name').limit(10).lean(),
     Combo.find({ isActive: true }).limit(6).lean(),
@@ -81,6 +91,7 @@ async function getData() {
     JSON.stringify({
       banners,
       newArrivals,
+      discountProducts,
       reviews,
       combos,
       categories,
@@ -94,6 +105,7 @@ export default async function HomePage() {
   const {
     banners,
     newArrivals: plainNewArrivals,
+    discountProducts: plainDiscountProducts,
     reviews,
     combos: plainCombos,
     categories: plainCategories,
@@ -198,7 +210,8 @@ export default async function HomePage() {
         </section>
       )}
 
-      {/* Featured collection: centered copy, up to 6 New Arrivals, CTA */}
+      {/* Featured collection: centered copy, up to 6 New Arrivals, CTA.
+          These cards always show the ORIGINAL price. */}
       <section className="max-w-6xl mx-auto px-4 pt-6 pb-16 text-center">
         <h3
           className="text-lg sm:text-xl font-bold tracking-[3px] uppercase"
@@ -224,6 +237,42 @@ export default async function HomePage() {
           Shop the collection
         </Link>
       </section>
+
+      {/* Discount Offers: only products with a live discount, shown with the
+          offer price. Links carry ?src=discount so the product page and cart
+          use the discount price. Hidden when there are none. */}
+      {plainDiscountProducts?.length > 0 && (
+        <section className="py-16 border-t" style={{ background: PAPER, borderColor: HAIRLINE }}>
+          <div className="max-w-6xl mx-auto px-4 text-center">
+            <span
+              className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-[3px] mb-3 px-3 py-1"
+              style={{ color: INK, background: GOLD, fontFamily: FONT_SANS }}
+            >
+              <Tag size={11} /> Limited Offers
+            </span>
+            <h2
+              className="text-xl sm:text-2xl font-bold tracking-[3px] uppercase"
+              style={{ color: PURPLE, fontFamily: FONT_SANS }}
+            >
+              Discount Offers
+            </h2>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-6 sm:gap-8 mt-8 text-left">
+              {plainDiscountProducts.map((p) => (
+                <ProductCard key={p._id} product={toCardProduct(p, { discount: true })} />
+              ))}
+            </div>
+
+            <Link
+              href="/discounts"
+              className="inline-block mt-10 px-8 py-3 text-[12px] font-bold tracking-[2px] uppercase transition-colors bg-[#F7B900] hover:bg-[#4B087A] text-[#24052F] hover:text-[#FFF5E8]"
+              style={{ fontFamily: FONT_SANS }}
+            >
+              View all offers
+            </Link>
+          </div>
+        </section>
+      )}
 
       {/* Combo Offers */}
       {plainCombos?.length > 0 && (

@@ -4,8 +4,9 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  LayoutDashboard, Package, ListTree, ShoppingCart, Boxes, Image as ImageIcon,Sparkles,BellRing,
-  Clapperboard, Star, Ticket, Layers, FileBarChart, Settings as SettingsIcon, Menu, X, LogOut
+  LayoutDashboard, Package, ListTree, ShoppingCart, Boxes, Image as ImageIcon, Sparkles, BellRing,
+  Clapperboard, Star, Ticket, Layers, FileBarChart, Settings as SettingsIcon, Menu, X, LogOut, Percent,
+  Receipt
 } from 'lucide-react';
 
 // Design tokens: same royal purple / gold / ivory system as the rest of the site.
@@ -19,20 +20,22 @@ const LINE = '#D9B4E8';       // soft lavender borders
 const PAPER = '#FFF5E8';      // ivory background
 
 const NAV = [
-  { href: '/admin',            label: 'Dashboard',     icon: LayoutDashboard },
-  { href: '/admin/products',   label: 'Products',      icon: Package },
-  { href: '/admin/categories', label: 'Categories',    icon: ListTree },
-  { href: '/admin/orders',     label: 'Orders',        icon: ShoppingCart },
-  { href: '/admin/inventory',  label: 'Inventory',     icon: Boxes },
+  { href: '/admin',            label: 'Dashboard',       icon: LayoutDashboard },
+  { href: '/admin/products',   label: 'Products',        icon: Package },
+  { href: '/admin/discounts',  label: 'Discounts',       icon: Percent },
+  { href: '/admin/categories', label: 'Categories',      icon: ListTree },
+  { href: '/admin/orders',     label: 'Orders',          icon: ShoppingCart },
+  { href: '/admin/invoices',   label: 'Invoices',        icon: Receipt },
+  { href: '/admin/inventory',  label: 'Inventory',       icon: Boxes },
   { href: '/admin/notify',     label: 'Notify Requests', icon: BellRing },
-  { href: '/admin/combos',     label: 'Combo Offers',  icon: Layers },
-  { href: '/admin/banners',    label: 'Banners',       icon: ImageIcon },
-  { href: '/admin/reels',      label: 'Shop by Reels', icon: Clapperboard },
-  { href: '/admin/reviews',    label: 'Reviews',       icon: Star },
-  { href: '/admin/coupons',    label: 'Coupons',       icon: Ticket },
-  { href: '/admin/reports',    label: 'Sales Reports', icon: FileBarChart },
-     { href: '/admin/cofounder', label: 'AI Cofounder', icon: Sparkles },
-  { href: '/admin/settings',   label: 'Settings',      icon: SettingsIcon },
+  { href: '/admin/combos',     label: 'Combo Offers',    icon: Layers },
+  { href: '/admin/banners',    label: 'Banners',         icon: ImageIcon },
+  { href: '/admin/reels',      label: 'Shop by Reels',   icon: Clapperboard },
+  { href: '/admin/reviews',    label: 'Reviews',         icon: Star },
+  { href: '/admin/coupons',    label: 'Coupons',         icon: Ticket },
+  { href: '/admin/reports',    label: 'Sales Reports',   icon: FileBarChart },
+  { href: '/admin/cofounder',  label: 'AI Cofounder',    icon: Sparkles },
+  { href: '/admin/settings',   label: 'Settings',        icon: SettingsIcon },
 ];
 
 export default function AdminShell({ admin, children }) {

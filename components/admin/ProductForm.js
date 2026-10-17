@@ -6,6 +6,10 @@ import toast from 'react-hot-toast';
 import { Plus, Trash2, Upload, Loader2, X } from 'lucide-react';
 import { INDIAN_STATES } from '@/lib/indianStates';
 import OptionGroupsEditor from '@/components/OptionGroupsEditor';
+import { uploadFile } from '@/lib/uploadFile';
+import { computeBasePrice } from '@/lib/pricing';
+import { applyDiscount } from '@/lib/discount';
+import { formatINR } from '@/lib/utils';
 
 // Design tokens: same royal purple / gold / ivory system as the rest of the site.
 // Palette: #4B087A #F7B900 #FFF5E8 #24052F #D9B4E8
@@ -50,6 +54,26 @@ function normalizeVariants(variants) {
     ...v,
     sizes: (v.sizes || []).map((s) => ({ ...s, price: s.price ?? '' })),
   }));
+}
+
+// <input type="datetime-local"> needs "YYYY-MM-DDTHH:mm" in the admin's LOCAL time.
+function toLocalInput(d) {
+  if (!d) return '';
+  const dt = new Date(d);
+  if (isNaN(dt.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+}
+
+// Discount block as the form edits it (value kept as string so the input can be blank).
+function normalizeDiscount(d) {
+  return {
+    isActive: !!d?.isActive,
+    type: d?.type === 'flat' ? 'flat' : 'percent',
+    value: Number(d?.value) > 0 ? d.value : '',
+    startsAt: toLocalInput(d?.startsAt),
+    endsAt: toLocalInput(d?.endsAt),
+  };
 }
 
 // Admin-defined option groups. Old products only have the fixed sleeve / zip
@@ -129,17 +153,15 @@ function ImageSlot({ value, onChange, onRemove, showRemove }) {
     if (!file) return;
     setUploading(true);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch('/api/upload', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Upload failed');
-      onChange(data.url);
+      // Compressed to WebP in the browser, then sent straight to Cloudflare R2
+      const url = await uploadFile(file, 'products');
+      onChange(url);
       toast.success('Image uploaded');
     } catch (err) {
       toast.error(err.message);
     } finally {
       setUploading(false);
+      e.target.value = '';
     }
   }
 
@@ -310,6 +332,7 @@ export default function ProductForm({ initial, productId }) {
       shawlOptions: (base.shawlOptions || []).map((o) => ({ ...o })),
       freeShipping: !!base.freeShipping,
       freeShippingStates: base.freeShippingStates || [],
+      discount: normalizeDiscount(base.discount),
     };
   });
   const [saving, setSaving] = useState(false);
@@ -325,6 +348,10 @@ export default function ProductForm({ initial, productId }) {
   }, []);
 
   function update(field, value) { setForm((f) => ({ ...f, [field]: value })); }
+
+  function updateDiscount(key, value) {
+    setForm((f) => ({ ...f, discount: { ...f.discount, [key]: value } }));
+  }
 
   function toggleArrayValue(field, value) {
     setForm((f) => {
@@ -421,12 +448,8 @@ export default function ProductForm({ initial, productId }) {
     try {
       const uploaded = [];
       for (const file of files) {
-        const fd = new FormData();
-        fd.append('file', file);
-        const res = await fetch('/api/upload', { method: 'POST', body: fd });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Upload failed');
-        uploaded.push(data.url);
+        // Compressed to WebP in the browser, then sent straight to Cloudflare R2
+        uploaded.push(await uploadFile(file, 'sizecharts'));
       }
       setForm((f) => ({ ...f, sizeChart: [...(f.sizeChart || []), ...uploaded] }));
       toast.success(`${uploaded.length} size chart image${uploaded.length > 1 ? 's' : ''} uploaded`);
@@ -442,12 +465,47 @@ export default function ProductForm({ initial, productId }) {
     setForm((f) => ({ ...f, sizeChart: (f.sizeChart || []).filter((_, i) => i !== idx) }));
   }
 
+  // Lowest price across all variants / sizes (same rule the server uses for basePrice),
+  // used only for the discount preview below.
+  const previewBasePrice = computeBasePrice(
+    (form.variants || []).map((v) => ({
+      ...v,
+      price: Number(v.price) || 0,
+      sizes: (v.sizes || []).map((s) => ({
+        ...s,
+        price: s.price === '' || s.price == null ? null : Number(s.price),
+      })),
+    }))
+  );
+  const discountValue = Number(form.discount?.value) || 0;
+  const discountPreview =
+    previewBasePrice > 0 && discountValue > 0
+      ? applyDiscount(previewBasePrice, { type: form.discount.type, value: discountValue })
+      : null;
+
   async function submit(e) {
     e.preventDefault();
 
     if (shipMode === 'states' && (form.freeShippingStates || []).length === 0) {
       toast.error('Select at least one state for free shipping, or choose another option');
       return;
+    }
+
+    // Discount validation (only when switched on)
+    const d = form.discount || {};
+    if (d.isActive) {
+      if (!(Number(d.value) > 0)) {
+        toast.error('Enter a discount value, or switch the discount off');
+        return;
+      }
+      if (d.type === 'percent' && Number(d.value) > 95) {
+        toast.error('Percent discount can be at most 95%');
+        return;
+      }
+      if (d.startsAt && d.endsAt && new Date(d.endsAt) <= new Date(d.startsAt)) {
+        toast.error('Discount end time must be after the start time');
+        return;
+      }
     }
 
     // Option groups: a type needs a name and at least one named choice
@@ -486,6 +544,15 @@ export default function ProductForm({ initial, productId }) {
       // Free shipping: everywhere, or only in the selected states
       freeShipping: shipMode === 'all',
       freeShippingStates: shipMode === 'states' ? (form.freeShippingStates || []) : [],
+      // Discount section pricing. Dates are converted from the admin's local time
+      // to ISO (UTC) here, so the server doesn't misread them in its own timezone.
+      discount: {
+        isActive: !!d.isActive,
+        type: d.type === 'flat' ? 'flat' : 'percent',
+        value: Number(d.value) || 0,
+        startsAt: d.startsAt ? new Date(d.startsAt).toISOString() : null,
+        endsAt: d.endsAt ? new Date(d.endsAt).toISOString() : null,
+      },
       pantOptions: (form.pantOptions || [])
         .filter((o) => o.name?.trim())
         .map((o) => ({
@@ -920,6 +987,97 @@ export default function ProductForm({ initial, productId }) {
             </button>
           </div>
         ))}
+      </div>
+
+      {/* Discount: the offer price is used ONLY when a customer buys this product
+          from the Discounts section. Product pages and category pages keep showing
+          the original price. Stock is the same stock entered above. */}
+      <div style={cardStyle}>
+        <div className="flex items-center justify-between mb-3">
+          <p style={{ ...sectionHeadStyle, marginBottom: 0 }}>Discount</p>
+          <label
+            className="flex items-center gap-2 text-sm cursor-pointer"
+            style={{ color: INK, fontFamily: 'sans-serif' }}
+          >
+            <input
+              type="checkbox"
+              checked={!!form.discount?.isActive}
+              onChange={(e) => updateDiscount('isActive', e.target.checked)}
+              style={{ accentColor: PURPLE, width: '15px', height: '15px' }}
+            />
+            Show in Discounts section
+          </label>
+        </div>
+        <p style={{ fontSize: '12px', color: INK_SOFT, fontFamily: 'sans-serif', marginBottom: form.discount?.isActive ? '12px' : 0 }}>
+          When on, this product also appears on the Discounts page with the offer price. The same product still sells
+          at the original price everywhere else, from the same stock.
+        </p>
+
+        {form.discount?.isActive && (
+          <>
+            <div className="grid sm:grid-cols-4 gap-3">
+              <div>
+                <label style={labelStyle}>Discount type</label>
+                <select
+                  style={inputStyle}
+                  value={form.discount.type}
+                  onChange={(e) => updateDiscount('type', e.target.value)}
+                  onFocus={(e) => (e.target.style.borderColor = PURPLE)}
+                  onBlur={(e) => (e.target.style.borderColor = LINE)}
+                >
+                  <option value="percent">Percent (% off)</option>
+                  <option value="flat">Flat (₹ off)</option>
+                </select>
+              </div>
+              <div>
+                <label style={labelStyle}>{form.discount.type === 'percent' ? 'Percent off' : 'Rupees off'}</label>
+                <input
+                  type="number"
+                  min="0"
+                  placeholder={form.discount.type === 'percent' ? 'e.g. 20' : 'e.g. 150'}
+                  style={inputStyle}
+                  value={form.discount.value}
+                  onChange={(e) => updateDiscount('value', e.target.value)}
+                  onFocus={(e) => (e.target.style.borderColor = PURPLE)}
+                  onBlur={(e) => (e.target.style.borderColor = LINE)}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Starts (optional)</label>
+                <input
+                  type="datetime-local"
+                  style={inputStyle}
+                  value={form.discount.startsAt}
+                  onChange={(e) => updateDiscount('startsAt', e.target.value)}
+                  onFocus={(e) => (e.target.style.borderColor = PURPLE)}
+                  onBlur={(e) => (e.target.style.borderColor = LINE)}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Ends (optional)</label>
+                <input
+                  type="datetime-local"
+                  style={inputStyle}
+                  value={form.discount.endsAt}
+                  onChange={(e) => updateDiscount('endsAt', e.target.value)}
+                  onFocus={(e) => (e.target.style.borderColor = PURPLE)}
+                  onBlur={(e) => (e.target.style.borderColor = LINE)}
+                />
+              </div>
+            </div>
+
+            {discountPreview != null && (
+              <p style={{ fontSize: '13px', color: INK, fontFamily: 'sans-serif', marginTop: '12px' }}>
+                Lowest price: {formatINR(previewBasePrice)} →{' '}
+                <b style={{ color: PURPLE }}>{formatINR(discountPreview)}</b> in the Discounts section
+              </p>
+            )}
+            <p style={{ fontSize: '11px', color: INK_SOFT, fontFamily: 'sans-serif', marginTop: '6px' }}>
+              The discount applies to the size/variant price only. Pant, shawl and customization extras are charged in full.
+              Leave start and end empty to run it until you switch it off.
+            </p>
+          </>
+        )}
       </div>
 
       {/* Pant Options: optional, product-level, admin can add any number */}
