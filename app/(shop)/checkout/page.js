@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Script from 'next/script';
 import toast from 'react-hot-toast';
-import { useCart, cartKey } from '@/components/CartContext';
+import { useCart, cartKey, formatSelections } from '@/components/CartContext';
 import { formatINR } from '@/lib/utils';
 import { INDIAN_STATES } from '@/lib/indianStates';
 
@@ -179,8 +179,9 @@ export default function CheckoutPage() {
             comboId: i.comboId,
             packKey: i.packKey,
             packDetails: i.packDetails,
-            sleeveType: i.sleeveType,
-            zipType: i.zipType,
+            sleeveType: i.sleeveType || '',
+            zipType: i.zipType || '',
+            customSelections: i.customSelections || [],
             pantOption: i.pantOption,
             shawlOption: i.shawlOption,
           })),
@@ -196,7 +197,20 @@ export default function CheckoutPage() {
       if (data.valid) return true;
 
       data.issues.forEach((issue) => {
-        const key = cartKey(issue);
+        // The server echoes the item back; if it doesn't include customSelections,
+        // fall back to the cart line with the same product/variant/size so the
+        // key matches the cart line exactly.
+        const source = issue.customSelections
+          ? issue
+          : items.find(
+              (i) =>
+                i.productId === issue.productId &&
+                i.variantId === issue.variantId &&
+                i.size === issue.size &&
+                (i.comboId || '') === (issue.comboId || '') &&
+                (i.packKey || '') === (issue.packKey || '')
+            ) || issue;
+        const key = cartKey({ ...issue, customSelections: source.customSelections });
         if (issue.reason === 'unavailable' || issue.reason === 'out_of_stock') {
           toast.error(`${issue.name || 'An item'} is out of stock and was removed from your cart`);
           removeItem(key);
@@ -238,6 +252,9 @@ export default function CheckoutPage() {
       size: i.size,
       sleeveType: i.sleeveType || '',
       zipType: i.zipType || '',
+      // Admin-defined option groups (e.g. "Sleeve Type"). The server validates
+      // required groups and prices these from the database.
+      customSelections: i.customSelections || [],
       pantOption: i.pantOption,
       shawlOption: i.shawlOption,
       qty: i.qty,
@@ -441,15 +458,23 @@ export default function CheckoutPage() {
             <p className={sectionHeadClass} style={{ color: PURPLE }}>Order Summary</p>
 
             <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-              {items.map((i, idx) => (
-                <div key={idx} className="flex justify-between text-sm py-1 gap-2" style={{ color: INK_SOFT }}>
-                  <span className="truncate">
-                    {i.name} ({[i.color, i.packDetails ? '' : i.size, i.sleeveType, i.zipType].filter(Boolean).join('/')}) ×{i.qty}
-                    {i.isCombo && i.pieces > 1 ? ` · ${i.qty * i.pieces} pcs` : ''}
-                  </span>
-                  <span className="shrink-0" style={{ color: INK }}>{formatINR(i.price * i.qty)}</span>
-                </div>
-              ))}
+              {items.map((i) => {
+                const selText = formatSelections(i);
+                return (
+                  <div key={cartKey(i)} className="flex justify-between text-sm py-1 gap-2" style={{ color: INK_SOFT }}>
+                    <span className="min-w-0">
+                      <span className="block truncate">
+                        {i.name} ({[i.color, i.packDetails ? '' : i.size, i.sleeveType, i.zipType].filter(Boolean).join('/')}) ×{i.qty}
+                        {i.isCombo && i.pieces > 1 ? ` · ${i.qty * i.pieces} pcs` : ''}
+                      </span>
+                      {selText && (
+                        <span className="block text-xs truncate" style={{ opacity: 0.85 }}>{selText}</span>
+                      )}
+                    </span>
+                    <span className="shrink-0" style={{ color: INK }}>{formatINR(i.price * i.qty)}</span>
+                  </div>
+                );
+              })}
             </div>
 
             {/* Coupon: user types the code, then applies it */}

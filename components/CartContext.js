@@ -47,9 +47,41 @@ function brandToast(message, opts = {}) {
 
 const warnStyle = { ...toastBase.style, borderLeftColor: HAIRLINE };
 
+// ── Admin-defined option groups (e.g. "Sleeve Type") ───────
+// Selections are stored on the cart line as `customSelections`.
+// Field names are read defensively because the exact shape comes from the
+// product page; adjust here if yours differs.
+function selGroup(s) {
+  return s.groupId ?? s.groupName ?? s.group ?? s.label ?? '';
+}
+function selOption(s) {
+  return s.optionId ?? s.optionName ?? s.option ?? s.name ?? s.value ?? '';
+}
+
+// Stable string for a line's selections (order-independent), used to keep
+// lines with different choices from merging into one.
+function selKey(i) {
+  const sel = Array.isArray(i.customSelections) ? i.customSelections : [];
+  if (!sel.length) return '';
+  return sel.map((s) => `${selGroup(s)}:${selOption(s)}`).sort().join('|');
+}
+
+// Human-readable text, e.g. "Sleeve Type: Short Sleeve · Fit: Regular".
+export function formatSelections(i) {
+  const sel = Array.isArray(i.customSelections) ? i.customSelections : [];
+  return sel
+    .map((s) => {
+      const g = s.groupName ?? s.group ?? s.label ?? '';
+      const o = s.optionName ?? s.option ?? s.name ?? s.value ?? '';
+      return g ? `${g}: ${o}` : String(o);
+    })
+    .filter(Boolean)
+    .join(' · ');
+}
+
 // A cart/order line is unique per product+variant+size AND per sleeve/zip/
-// pant/shawl selection, and for color-pack combos per pack size + color
-// breakdown (packKey) so different packs never merge into one line.
+// pant/shawl/custom-option selection, and for color-pack combos per pack size
+// + color breakdown (packKey) so different packs never merge into one line.
 function sameLine(a, b) {
   return (
     a.productId === b.productId &&
@@ -60,7 +92,8 @@ function sameLine(a, b) {
     (a.sleeveType || '') === (b.sleeveType || '') &&
     (a.zipType || '') === (b.zipType || '') &&
     (a.pantOption?.id || '') === (b.pantOption?.id || '') &&
-    (a.shawlOption?.id || '') === (b.shawlOption?.id || '')
+    (a.shawlOption?.id || '') === (b.shawlOption?.id || '') &&
+    selKey(a) === selKey(b)
   );
 }
 
@@ -261,6 +294,7 @@ export function cartKey(i) {
     i.zipType,
     i.pantOption?.id,
     i.shawlOption?.id,
+    selKey(i),
   ].filter(Boolean).join('-');
 }
 

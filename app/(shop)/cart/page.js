@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useCart, cartKey } from '@/components/CartContext';
+import { useCart, cartKey, formatSelections } from '@/components/CartContext';
 import { formatINR } from '@/lib/utils';
 import { Trash2, ShoppingBag } from 'lucide-react';
 
@@ -44,6 +44,8 @@ export default function CartPage() {
       <div className="space-y-0">
         {items.map((item, idx) => {
           const key = cartKey(item);
+          const selText = formatSelections(item);
+          const extras = [item.sleeveType, item.zipType].filter(Boolean).join(' · ');
           return (
             <div
               key={key}
@@ -61,6 +63,11 @@ export default function CartPage() {
                 <p className="text-xs mt-1" style={{ color: INK_SOFT }}>
                   Color: {item.color} &nbsp;·&nbsp; Size: {item.size}
                 </p>
+                {(selText || extras) && (
+                  <p className="text-xs mt-0.5" style={{ color: INK_SOFT }}>
+                    {[selText, extras].filter(Boolean).join(' · ')}
+                  </p>
+                )}
                 {item.isCombo && item.pieces > 1 && (
                   <p className="text-xs mt-0.5" style={{ color: INK_SOFT }}>
                     {item.pieces} pieces{item.qty > 1 ? ` each · ${item.qty * item.pieces} total` : ''}
