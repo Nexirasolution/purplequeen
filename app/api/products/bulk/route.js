@@ -7,6 +7,7 @@ import slugify from 'slugify';
 import { requireAdmin } from '@/lib/apiAuth';
 import { computeBasePrice } from '@/lib/pricing';
 import { sanitizeFreeShipping } from '@/lib/freeShipping';
+import { sanitizeOptionGroups } from '@/lib/optionGroups';
 
 // POST /api/products/bulk
 // body: {
@@ -14,8 +15,9 @@ import { sanitizeFreeShipping } from '@/lib/freeShipping';
 //   price, compareAtPrice, sizes: [{ size, stock, price? }],
 //   images: [url, url, ...], tags,
 //   isReadyToShip, sizeChart: [url, url, ...],
-//   sleeveOptions: [ 'Full Sleeve' | 'Half Sleeve' | 'Elbow Sleeve' | 'Sleeveless', ... ],
-//   zipOptions: [ 'With Zip' | 'Without Zip', ... ],
+//   optionGroups: [ { name, required, choices: [{ label, price }] }, ... ],
+//   sleeveOptions: [ 'Full Sleeve' | 'Half Sleeve' | 'Elbow Sleeve' | 'Sleeveless', ... ],  // legacy
+//   zipOptions: [ 'With Zip' | 'Without Zip', ... ],                                        // legacy
 //   freeShipping: boolean,            // free in every state
 //   freeShippingStates: [ 'Kerala' ]  // free only in these states
 // }
@@ -23,7 +25,7 @@ import { sanitizeFreeShipping } from '@/lib/freeShipping';
 // - Title = auto-derived from the CATEGORY name + zero-padded number.
 // - SKU = admin-typed short code + zero-padded number.
 // - Each size may carry its own optional `price`; blank/0 => the default `price` is used.
-// - isReadyToShip / sizeChart / sleeveOptions / zipOptions / free shipping apply to every product in the batch.
+// - isReadyToShip / sizeChart / optionGroups / sleeveOptions / zipOptions / free shipping apply to every product in the batch.
 export const POST = requireAdmin(async (req) => {
   try {
     await dbConnect();
@@ -42,6 +44,7 @@ export const POST = requireAdmin(async (req) => {
       tags = [],
       isReadyToShip = false,
       sizeChart = [],
+      optionGroups = [],
       sleeveOptions = [],
       zipOptions = [],
     } = body;
@@ -89,6 +92,9 @@ export const POST = requireAdmin(async (req) => {
     const zipOptionsClean = Array.isArray(zipOptions)
       ? zipOptions.filter((z) => ALLOWED_ZIP.includes(z))
       : [];
+
+    // Admin-defined types + choices (+ extra price per choice)
+    const optionGroupsClean = sanitizeOptionGroups(optionGroups);
 
     const cat = await Category.findById(category);
     if (!cat) return NextResponse.json({ error: 'Category not found' }, { status: 404 });
@@ -184,6 +190,10 @@ export const POST = requireAdmin(async (req) => {
           basePrice: computeBasePrice([variant]),
           isReadyToShip: !!isReadyToShip,
           sizeChart: sizeChartImages,
+          optionGroups: optionGroupsClean.map((g) => ({
+            ...g,
+            choices: g.choices.map((c) => ({ ...c })),
+          })),
           sleeveOptions: sleeveOptionsClean,
           zipOptions: zipOptionsClean,
           freeShipping: !!freeShipping,

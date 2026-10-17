@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { Plus, Trash2, Upload, Loader2, X } from 'lucide-react';
 import { INDIAN_STATES } from '@/lib/indianStates';
+import OptionGroupsEditor from '@/components/OptionGroupsEditor';
 
 // Design tokens: same royal purple / gold / ivory system as the rest of the site.
 // Palette: #4B087A #F7B900 #FFF5E8 #24052F #D9B4E8
@@ -49,6 +50,35 @@ function normalizeVariants(variants) {
     ...v,
     sizes: (v.sizes || []).map((s) => ({ ...s, price: s.price ?? '' })),
   }));
+}
+
+// Admin-defined option groups. Old products only have the fixed sleeve / zip
+// checkboxes, so convert those into groups the first time they are opened
+// (nothing is lost; saving stores them as optionGroups).
+function buildInitialOptionGroups(p) {
+  if (p.optionGroups?.length) {
+    return p.optionGroups.map((g) => ({
+      name: g.name,
+      required: g.required !== false,
+      choices: (g.choices || []).map((c) => ({ label: c.label, price: c.price || '' })),
+    }));
+  }
+  const groups = [];
+  if (p.sleeveOptions?.length) {
+    groups.push({
+      name: 'Sleeve Type',
+      required: true,
+      choices: p.sleeveOptions.map((label) => ({ label, price: '' })),
+    });
+  }
+  if (p.zipOptions?.length) {
+    groups.push({
+      name: 'Zip Type',
+      required: true,
+      choices: p.zipOptions.map((label) => ({ label, price: '' })),
+    });
+  }
+  return groups;
 }
 
 // Shared input style
@@ -262,8 +292,7 @@ export default function ProductForm({ initial, productId }) {
       name: '', slug: '', sku: '', description: '', category: '', fabric: '', tags: [], weight: '',
       variants: [emptyVariant()],
       sizeChart: [],
-      sleeveOptions: [],
-      zipOptions: [],
+      optionGroups: [],
       pantOptions: [],
       shawlOptions: [],
       freeShipping: false,
@@ -276,8 +305,7 @@ export default function ProductForm({ initial, productId }) {
       weight: base.weight > 0 ? base.weight : '',
       variants: normalizeVariants(base.variants),
       sizeChart: normalizeSizeChart(base.sizeChart),
-      sleeveOptions: base.sleeveOptions || [],
-      zipOptions: base.zipOptions || [],
+      optionGroups: buildInitialOptionGroups(base),
       pantOptions: (base.pantOptions || []).map((o) => ({ ...o })),
       shawlOptions: (base.shawlOptions || []).map((o) => ({ ...o })),
       freeShipping: !!base.freeShipping,
@@ -422,6 +450,27 @@ export default function ProductForm({ initial, productId }) {
       return;
     }
 
+    // Option groups: a type needs a name and at least one named choice
+    const groupsToSave = (form.optionGroups || [])
+      .map((g) => ({
+        name: (g.name || '').trim(),
+        required: g.required !== false,
+        choices: (g.choices || [])
+          .map((c) => ({ label: (c.label || '').trim(), price: Math.max(0, Number(c.price) || 0) }))
+          .filter((c) => c.label),
+      }))
+      .filter((g) => g.name || g.choices.length);
+
+    const badGroup = groupsToSave.find((g) => !g.name || g.choices.length === 0);
+    if (badGroup) {
+      toast.error(
+        !badGroup.name
+          ? 'Every customization type needs a name'
+          : `"${badGroup.name}" needs at least one choice`
+      );
+      return;
+    }
+
     setSaving(true);
     // Note: sku is intentionally omitted: it's auto-generated/managed server-side
     // based on the product's category (see /api/products and /api/products/[id]).
@@ -429,8 +478,11 @@ export default function ProductForm({ initial, productId }) {
       ...form,
       weight: Math.max(0, Number(form.weight) || 0), // grams, manual entry
       sizeChart: form.sizeChart || [],
-      sleeveOptions: form.sleeveOptions || [],
-      zipOptions: form.zipOptions || [],
+      // Sleeve / zip are now regular option groups; clear the legacy fields so
+      // the product page doesn't show them twice.
+      sleeveOptions: [],
+      zipOptions: [],
+      optionGroups: groupsToSave,
       // Free shipping: everywhere, or only in the selected states
       freeShipping: shipMode === 'all',
       freeShippingStates: shipMode === 'states' ? (form.freeShippingStates || []) : [],
@@ -606,44 +658,13 @@ export default function ProductForm({ initial, productId }) {
             <input ref={sizeChartFileRef} type="file" accept="image/*" multiple className="hidden" onChange={handleSizeChartFilesChange} />
           </div>
 
-          {/* Sleeve/Zip options: product-level, not per-variant. */}
-          <div className="sm:col-span-2 grid sm:grid-cols-2 gap-4">
-            <div>
-              <label style={labelStyle}>
-                Sleeve Type Options <span style={{ fontWeight: '400', textTransform: 'none', letterSpacing: 0 }}>(optional)</span>
-              </label>
-              <div className="flex flex-wrap gap-3 mt-2">
-                {['Full Sleeve', 'Half Sleeve', 'Elbow Sleeve', 'Sleeveless'].map((opt) => (
-                  <label key={opt} className="flex items-center gap-1.5 text-sm cursor-pointer" style={{ color: INK, fontFamily: 'sans-serif' }}>
-                    <input
-                      type="checkbox"
-                      checked={(form.sleeveOptions || []).includes(opt)}
-                      onChange={() => toggleArrayValue('sleeveOptions', opt)}
-                      style={{ accentColor: PURPLE, width: '15px', height: '15px' }}
-                    />
-                    {opt}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label style={labelStyle}>
-                Zip Type Options <span style={{ fontWeight: '400', textTransform: 'none', letterSpacing: 0 }}>(optional)</span>
-              </label>
-              <div className="flex flex-wrap gap-3 mt-2">
-                {['With Zip', 'Without Zip'].map((opt) => (
-                  <label key={opt} className="flex items-center gap-1.5 text-sm cursor-pointer" style={{ color: INK, fontFamily: 'sans-serif' }}>
-                    <input
-                      type="checkbox"
-                      checked={(form.zipOptions || []).includes(opt)}
-                      onChange={() => toggleArrayValue('zipOptions', opt)}
-                      style={{ accentColor: PURPLE, width: '15px', height: '15px' }}
-                    />
-                    {opt}
-                  </label>
-                ))}
-              </div>
-            </div>
+          {/* Customization options: admin-defined types (e.g. Sleeve Type, Zip Type)
+              with choices (sub-types) and an optional extra price per choice. */}
+          <div className="sm:col-span-2">
+            <OptionGroupsEditor
+              value={form.optionGroups}
+              onChange={(v) => update('optionGroups', v)}
+            />
           </div>
 
           {/* Free shipping: whole product, or only for selected states */}

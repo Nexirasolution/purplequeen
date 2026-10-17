@@ -10,6 +10,7 @@ import { requireAdmin } from '@/lib/apiAuth';
 import { generateSku } from '@/lib/sku';
 import { computeBasePrice } from '@/lib/pricing';
 import { sanitizeFreeShipping } from '@/lib/freeShipping';
+import { sanitizeOptionGroups } from '@/lib/optionGroups';
 
 // GET /api/products?category=slug&size=M&minPrice=0&maxPrice=2000&sort=newest&page=1&limit=20&flag=bestseller
 // Pass limit=all to skip pagination entirely and return every matching product.
@@ -119,6 +120,9 @@ export const POST = requireAdmin(async (req) => {
 
     // Clean freeShipping / freeShippingStates coming from the admin form
     sanitizeFreeShipping(body);
+
+    // Clean admin-defined option groups (types + choices + extra prices)
+    body.optionGroups = sanitizeOptionGroups(body.optionGroups);
 
     const sku = await generateSku(body.category);
 

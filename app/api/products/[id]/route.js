@@ -6,6 +6,7 @@ import { requireAdmin } from '@/lib/apiAuth';
 import { getProductPageData, getFilter } from '@/lib/products';
 import { computeBasePrice } from '@/lib/pricing';
 import { sanitizeFreeShipping } from '@/lib/freeShipping';
+import { sanitizeOptionGroups } from '@/lib/optionGroups';
 
 // Admin read (?admin=1): always fresh, includes inactive products, and the
 // category stays a plain id so the edit form can post it back safely.
@@ -52,13 +53,18 @@ export const PUT = requireAdmin(async (req, { params }) => {
   // Clean freeShipping / freeShippingStates (updates skip schema validators)
   sanitizeFreeShipping(body);
 
+  // Clean admin-defined option groups (updates skip schema validators).
+  // Only touched when the request actually sends them, so partial updates
+  // (e.g. the inventory page saving stock) never wipe a product's options.
+  if ('optionGroups' in body) body.optionGroups = sanitizeOptionGroups(body.optionGroups);
+
   if (body.variants?.length) {
     body.basePrice = computeBasePrice(body.variants);
   }
 
   // Persists whatever is on body (sizeChart / isReadyToShip / sleeveOptions /
-  // zipOptions / pantOptions / shawlOptions / freeShipping / freeShippingStates)
-  // as long as the schema defines them.
+  // zipOptions / optionGroups / pantOptions / shawlOptions / freeShipping /
+  // freeShippingStates) as long as the schema defines them.
   const product = await Product.findOneAndUpdate(getFilter(id), body, { new: true });
   if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
 

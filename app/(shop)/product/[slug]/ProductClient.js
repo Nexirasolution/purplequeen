@@ -11,6 +11,7 @@ import { getSizeStock, getCombinedStock } from '@/lib/stock';
 import { useCart } from '@/components/CartContext';
 import { useWishlist } from '@/components/WhishlistContext';
 import ColorSizeSelector from '@/components/ColorSizeSelector';
+import CustomOptionsSelector from '@/components/CustomOptionsSelector';
 import ProductCard from '@/components/ProductCard';
 import { display, body } from '@/lib/fonts';
 import toast from 'react-hot-toast';
@@ -46,8 +47,11 @@ export default function ProductClient({ data }) {
   const [activeVariant, setActiveVariant] = useState(product.variants?.[0] ?? null);
   const [activeImage, setActiveImage] = useState(0);
   const [activeSize, setActiveSize] = useState('');
+  // LEGACY fixed sleeve / zip (only used by products not yet re-saved in the admin)
   const [activeSleeve, setActiveSleeve] = useState('');
   const [activeZip, setActiveZip] = useState('');
+  // Admin-defined option groups: { [groupName]: choiceLabel }
+  const [customPicks, setCustomPicks] = useState({});
   const [activePantId, setActivePantId] = useState('');
   const [activeShawlId, setActiveShawlId] = useState('');
   const [qty, setQty] = useState(1);
@@ -90,7 +94,22 @@ export default function ProductClient({ data }) {
     () => product.shawlOptions?.find((s) => s._id === activeShawlId) || null,
     [product.shawlOptions, activeShawlId]
   );
-  const addonTotal = (selectedPant?.price || 0) + (selectedShawl?.price || 0);
+
+  // Admin-defined option groups: the selected choice's extra price is added on top.
+  const optionGroups = useMemo(() => product.optionGroups || [], [product.optionGroups]);
+  const customSelections = useMemo(
+    () =>
+      optionGroups
+        .map((g) => {
+          const c = g.choices?.find((c) => c.label === customPicks[g.name]);
+          return c ? { group: g.name, choice: c.label, price: Number(c.price) || 0 } : null;
+        })
+        .filter(Boolean),
+    [optionGroups, customPicks]
+  );
+  const customExtra = customSelections.reduce((sum, s) => sum + s.price, 0);
+
+  const addonTotal = (selectedPant?.price || 0) + (selectedShawl?.price || 0) + customExtra;
   const unitPrice = currentBasePrice + addonTotal;
   const unitCompareAtPrice = compareBase ? compareBase + addonTotal : 0;
 
@@ -186,6 +205,10 @@ export default function ProductClient({ data }) {
     if (s !== Infinity) setQty((q) => Math.min(q, Math.max(s, 1)));
   }
 
+  function handleCustomPick(groupName, choiceLabel) {
+    setCustomPicks((p) => ({ ...p, [groupName]: choiceLabel }));
+  }
+
   function buildCartPayload() {
     return {
       productId: product._id,
@@ -197,6 +220,9 @@ export default function ProductClient({ data }) {
       size: activeSize,
       sleeveType: activeSleeve,
       zipType: activeZip,
+      // Admin-defined options the customer picked: [{ group, choice, price }]
+      // (the server re-checks these and recalculates the price itself)
+      customSelections,
       pantOption: selectedPant
         ? { id: selectedPant._id, name: selectedPant.name, price: selectedPant.price, image: selectedPant.image, sku: selectedPant.sku }
         : null,
@@ -215,6 +241,12 @@ export default function ProductClient({ data }) {
     if (!activeSize) { toast.error('Please select a size'); return false; }
     if (product.sleeveOptions?.length && !activeSleeve) { toast.error('Please select a sleeve type'); return false; }
     if (product.zipOptions?.length && !activeZip) { toast.error('Please select a zip type'); return false; }
+    for (const g of optionGroups) {
+      if (g.required !== false && !customPicks[g.name]) {
+        toast.error(`Please select ${g.name}`);
+        return false;
+      }
+    }
     if (stock <= 0) { toast.error('This combination is out of stock'); return false; }
     if (qty > stock) {
       toast.error(`Only ${stock} left in stock`);
@@ -405,7 +437,7 @@ export default function ProductClient({ data }) {
             </div>
             {addonTotal > 0 && (
               <p className="text-xs mt-1" style={{ color: INK_SOFT }}>
-                Includes {formatINR(addonTotal)} for selected add-ons
+                Includes {formatINR(addonTotal)} for selected options
               </p>
             )}
 
@@ -437,6 +469,14 @@ export default function ProductClient({ data }) {
                 shawlOptions={product.shawlOptions}
                 activeShawlId={activeShawlId}
                 onShawlChange={handleShawlChange}
+                formatINR={formatINR}
+              />
+
+              {/* Admin-defined customization options (type -> choices, each with optional extra price) */}
+              <CustomOptionsSelector
+                groups={optionGroups}
+                picks={customPicks}
+                onPick={handleCustomPick}
                 formatINR={formatINR}
               />
             </div>

@@ -1,20 +1,23 @@
 'use client';
 
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useState } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import Image from 'next/image';
-import { MoreVertical, Heart } from 'lucide-react';
+import { MoreVertical, Heart, Bell } from 'lucide-react';
 import { formatINR } from '@/lib/utils';
 import { getVariantTotalStock } from '@/lib/stock';
 import { useWishlist } from '@/components/WhishlistContext'; // adjust path as needed
 
-// Palette: #4B087A #F7B900 #FFF5E8 #24052F #D9B4E8
-const PURPLE = '#4B087A';     // royal purple: prices, low-stock pill
-const GOLD = '#F7B900';       // sale badges, wishlisted heart
-const INK = '#24052F';        // deep purple for text
-const INK_FAINT = '#6E5A7C';  // muted purple-grey for secondary text
-const WASH = '#F6EAF9';       // image placeholder (light lavender tint)
-const PAPER = '#FFF5E8';      // ivory background
+// Loaded only when a customer actually taps "Notify me" (keeps the grid light)
+const NotifyMeModal = dynamic(() => import('@/components/NotifyMeModal'), { ssr: false });
+
+const PURPLE = '#4B087A';
+const GOLD = '#F7B900';
+const INK = '#24052F';
+const INK_FAINT = '#6E5A7C';
+const WASH = '#F6EAF9';
+const PAPER = '#FFF5E8';
 const FONT_SANS = "'Helvetica Neue', Helvetica, Arial, sans-serif";
 
 const pillBase = { padding: '6px 14px', borderRadius: '999px' };
@@ -35,6 +38,8 @@ function ProductCard({ product, priority = false }) {
   const { isWishlisted, toggleWishlist } = useWishlist();
   const wishlisted = isWishlisted(wishId);
 
+  const [notifyOpen, setNotifyOpen] = useState(false);
+
   const handleWishlistClick = useCallback(
     (e) => {
       e.preventDefault();
@@ -46,8 +51,6 @@ function ProductCard({ product, priority = false }) {
 
   return (
     <div className="relative" style={{ background: PAPER, fontFamily: FONT_SANS }}>
-      {/* Wishlist button sits outside the Link (valid HTML, better accessibility).
-          No backdrop-filter: expensive to paint across a grid on cheap phones */}
       <button
         type="button"
         onClick={handleWishlistClick}
@@ -98,7 +101,6 @@ function ProductCard({ product, priority = false }) {
         </div>
 
         <div className="pt-3">
-          {/* Name wraps to 2 lines max; fixed min height keeps grid rows aligned */}
           <h3
             className="text-sm sm:text-base font-medium leading-snug line-clamp-2 min-h-[2.5rem]"
             style={{ color: INK }}
@@ -106,7 +108,6 @@ function ProductCard({ product, priority = false }) {
             {product.name}
           </h3>
 
-          {/* Price + offer */}
           <div className="mt-1 flex items-baseline gap-x-3 gap-y-1 flex-wrap">
             <span className="font-bold text-lg sm:text-xl" style={{ color: PURPLE }}>
               {formatINR(price)}
@@ -134,6 +135,22 @@ function ProductCard({ product, priority = false }) {
           )}
         </div>
       </Link>
+
+      {/* Notify button: outside the Link so tapping it never navigates */}
+      {outOfStock && (
+        <>
+          <button
+            type="button"
+            onClick={() => setNotifyOpen(true)}
+            className="mt-3 w-full flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-semibold transition-transform active:scale-95"
+            style={{ background: PURPLE, color: PAPER }}
+          >
+            <Bell className="w-4 h-4" strokeWidth={2} />
+            Notify me
+          </button>
+          {notifyOpen && <NotifyMeModal product={product} onClose={() => setNotifyOpen(false)} />}
+        </>
+      )}
     </div>
   );
 }

@@ -36,6 +36,27 @@ const AddonOptionSchema = new mongoose.Schema(
   { _id: true }
 );
 
+// Admin-defined customization options.
+// A GROUP (type) is e.g. "Sleeve Type" / "Zip Type" / "Neck Style".
+// Each CHOICE (sub-type) is e.g. "Full Sleeve" with an optional EXTRA price
+// that is added on top of the product price when the customer picks it.
+const OptionChoiceSchema = new mongoose.Schema(
+  {
+    label: { type: String, required: true, trim: true },
+    price: { type: Number, default: 0, min: 0 }
+  },
+  { _id: false }
+);
+
+const OptionGroupSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    required: { type: Boolean, default: true },
+    choices: [OptionChoiceSchema]
+  },
+  { _id: false }
+);
+
 const ProductSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
@@ -51,8 +72,13 @@ const ProductSchema = new mongoose.Schema(
     // falls back to this product's category.sizeChart instead.
     sizeChart: [{ type: String }],
 
+    // LEGACY fixed options. New products use `optionGroups` below; the admin
+    // form converts these into groups the first time an old product is saved.
     sleeveOptions: [{ type: String, enum: ['Full Sleeve', 'Half Sleeve', 'Elbow Sleeve', 'Sleeveless'] }],
     zipOptions: [{ type: String, enum: ['With Zip', 'Without Zip'] }],
+
+    // Admin-defined types + choices (+ optional extra price per choice).
+    optionGroups: [OptionGroupSchema],
 
     pantOptions: [AddonOptionSchema],
     shawlOptions: [AddonOptionSchema],
