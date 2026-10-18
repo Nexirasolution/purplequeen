@@ -2,45 +2,65 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
+import { requireAdmin } from '@/lib/apiAuth';
 
 export const runtime = 'nodejs';
 
 // This route NEVER receives the file. It only signs a short-lived upload URL,
 // and the browser then PUTs the (already compressed) file straight to Cloudflare R2.
-// Vercel only handles a tiny JSON request, so there is no 4.5 MB body limit,
-// no sharp, and almost no function time.
 
-// Cloudflare R2 is S3-compatible.
-const r2 = new S3Client({
-  region: 'auto',
-  endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-  credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-  },
-});
-
-const BUCKET = process.env.R2_BUCKET;
-// Public bucket URL: custom domain (recommended) or the r2.dev URL, e.g. https://cdn.example.com
+// Accept both names so a .env.local typo can't break uploads again.
+const BUCKET = process.env.R2_BUCKET || process.env.R2_BUCKET_NAME;
+const ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
+const ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
+const SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
+// Public bucket URL: custom domain (recommended) or the r2.dev URL
 const PUBLIC_URL = (process.env.R2_PUBLIC_URL || '').replace(/\/$/, '');
 
+const r2 = new S3Client({
+  region: 'auto',
+  endpoint: `https://${ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  credentials: {
+    accessKeyId: ACCESS_KEY_ID || '',
+    secretAccessKey: SECRET_ACCESS_KEY || '',
+  },
+  // Newer AWS SDK versions add checksum params that R2 rejects on presigned URLs
+  requestChecksumCalculation: 'WHEN_REQUIRED',
+  responseChecksumValidation: 'WHEN_REQUIRED',
+});
+
 // SVG is deliberately NOT allowed: it can carry scripts.
-// Images are compressed to WebP in the browser (JPEG only as a fallback).
 const IMAGE_TYPES = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/avif': 'avif' };
 const VIDEO_TYPES = { 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' };
 
-// Limits are enforced by the signed URL (Content-Length is part of the signature).
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;   // compressed images are usually 100-400 KB
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 
 const CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
-export async function POST(req) {
-  // TODO (recommended): if only admins should upload, verify the lb_admin_token
-  // cookie here the same way app/admin/layout.js does, and return 401 if invalid.
-  // If review photos must stay public, add a Vercel Firewall rate-limit rule on /api/upload.
+// Folders any visitor may upload to (e.g. customer review photos).
+// Everything else (products, banners, categories, reels...) needs an admin login.
+// Change 'reviews' to whatever folder name your review upload uses.
+const PUBLIC_FOLDERS = new Set(['reviews']);
 
+async function signUpload(req) {
   try {
+    const missing = [
+      !ACCOUNT_ID && 'R2_ACCOUNT_ID',
+      !ACCESS_KEY_ID && 'R2_ACCESS_KEY_ID',
+      !SECRET_ACCESS_KEY && 'R2_SECRET_ACCESS_KEY',
+      !BUCKET && 'R2_BUCKET',
+      !PUBLIC_URL && 'R2_PUBLIC_URL',
+    ].filter(Boolean);
+
+    if (missing.length) {
+      console.error('Upload config missing env vars:', missing.join(', '));
+      return NextResponse.json(
+        { error: `Server upload config missing: ${missing.join(', ')}` },
+        { status: 500 }
+      );
+    }
+
     const { contentType, size, folder: rawFolder } = await req.json();
 
     const ext = IMAGE_TYPES[contentType] || VIDEO_TYPES[contentType];
@@ -85,4 +105,18 @@ export async function POST(req) {
     console.error('Upload sign failed:', err);
     return NextResponse.json({ error: 'Upload failed' }, { status: 500 });
   }
+}
+
+const adminSign = requireAdmin(signUpload);
+
+export async function POST(req, ctx) {
+  // Peek at the folder without consuming the body the real handler needs
+  let folder = '';
+  try {
+    const body = await req.clone().json();
+    folder = String(body?.folder || '');
+  } catch {}
+
+  if (PUBLIC_FOLDERS.has(folder)) return signUpload(req);
+  return adminSign(req, ctx);
 }
