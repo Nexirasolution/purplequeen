@@ -23,8 +23,9 @@ import { ArrowRight, Tag } from 'lucide-react';
 // function + DB queries on every request. (Replaces `force-dynamic`.)
 // The admin settings API calls revalidatePath('/') on save, so live-link changes
 // show instantly. The product API routes also call revalidatePath('/') so
-// discount changes show instantly. For other admin changes (banners,
-// categories, combos, reels, reviews) call revalidatePath('/') in those API routes as well.
+// discount changes show instantly. The category API routes now call
+// revalidatePath('/') too. For other admin changes (banners, combos, reels,
+// reviews) call revalidatePath('/') in those API routes as well.
 export const revalidate = 600;
 
 // Design tokens: shared purple / gold / ivory theme
@@ -55,6 +56,9 @@ const DISCOUNT_LIMIT = 4;
 // How many reels to show in the "Shop by Reels" row
 const REELS_LIMIT = 10;
 
+// Max main categories shown in the "Shop by Category" grid
+const CATEGORY_LIMIT = 24;
+
 async function getData() {
   await dbConnect();
   // Only fetch what the page actually renders.
@@ -72,8 +76,12 @@ async function getData() {
     Review.find({ isApproved: true, isFeatured: true }).populate('product', 'name').limit(10).lean(),
     Combo.find({ isActive: true }).limit(6).lean(),
     // Only main categories here: subcategories are excluded from the
-    // homepage "Shop by Category" grid.
-    Category.find({ isActive: true, parent: null }).limit(10).lean(),
+    // homepage "Shop by Category" grid. Sorted by the admin "Display order"
+    // (sortOrder), then name as a tie-breaker.
+    Category.find({ isActive: true, parent: null })
+      .sort({ sortOrder: 1, name: 1 })
+      .limit(CATEGORY_LIMIT)
+      .lean(),
     // Reels: newest first, with the linked product's name + slug for the
     // caption and "Shop now" link. Remove the isActive filter if your Reel
     // model has no such field.

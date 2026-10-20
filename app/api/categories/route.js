@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { dbConnect } from '@/lib/mongodb';
 import Category from '@/models/Category';
 import slugify from 'slugify';
@@ -46,5 +47,10 @@ export const POST = requireAdmin(async (req) => {
   // the admin UI only offers top-level categories as parent options, which
   // keeps the hierarchy to two levels in practice.
   const category = await Category.create({ ...body, slug, parent: body.parent || null });
+
+  // Refresh the cached homepage (and layout, so the navbar updates too)
+  revalidatePath('/');
+  revalidatePath('/', 'layout');
+
   return NextResponse.json({ category }, { status: 201 });
 });

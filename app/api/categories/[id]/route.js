@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import mongoose from 'mongoose';
 import { dbConnect } from '@/lib/mongodb';
 import Category from '@/models/Category';
@@ -25,17 +26,25 @@ export async function GET(req, { params }) {
   return NextResponse.json({ category, subcategories });
 }
 
+// Refresh the cached homepage (and layout, so the navbar updates too)
+function refreshStorefront() {
+  revalidatePath('/');
+  revalidatePath('/', 'layout');
+}
+
 export const PUT = requireAdmin(async (req, { params }) => {
   await dbConnect();
   const body = await req.json();
   if ('parent' in body) body.parent = body.parent || null;
   const category = await Category.findOneAndUpdate(getFilter(params.id), body, { new: true });
   if (!category) return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+  refreshStorefront();
   return NextResponse.json({ category });
 });
 
 export const DELETE = requireAdmin(async (req, { params }) => {
   await dbConnect();
   await Category.findOneAndDelete(getFilter(params.id));
+  refreshStorefront();
   return NextResponse.json({ success: true });
 });

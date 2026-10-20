@@ -6,6 +6,39 @@ import { Plus, Trash2, Pencil, X, Upload, Loader2, ArrowUp, ArrowDown, CornerDow
 
 const emptyForm = { name: '', slug: '', image: '', description: '', sizes: '', sortOrder: 0, sizeChart: [], parent: '' };
 
+const ALLOWED_TYPES = ['image/webp', 'image/jpeg', 'image/png', 'image/avif'];
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
+// Presigned upload flow:
+//   1. ask /api/upload for a short-lived signed URL (JSON body, no file)
+//   2. PUT the file straight to Cloudflare R2 with the exact headers returned
+// Returns the public URL to save in the database.
+async function uploadToR2(file, folder = 'categories') {
+  if (!ALLOWED_TYPES.includes(file.type)) {
+    throw new Error('Unsupported file type. Use JPG, PNG, WebP or AVIF.');
+  }
+  if (file.size > MAX_IMAGE_BYTES) {
+    throw new Error('Image is too large (max 8 MB).');
+  }
+
+  const signRes = await fetch('/api/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contentType: file.type, size: file.size, folder }),
+  });
+  const sign = await signRes.json().catch(() => ({}));
+  if (!signRes.ok) throw new Error(sign.error || 'Could not sign upload');
+
+  const putRes = await fetch(sign.uploadUrl, {
+    method: 'PUT',
+    headers: sign.headers,
+    body: file,
+  });
+  if (!putRes.ok) throw new Error('Upload to storage failed (check R2 CORS settings)');
+
+  return sign.url;
+}
+
 function normalizeSizeChart(value) {
   if (Array.isArray(value)) return value;
   if (value) return [value]; // backward-compat with the old single-string field
@@ -127,21 +160,19 @@ export default function AdminCategoriesPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const previousPreview = preview;
     setPreview(URL.createObjectURL(file));
     setUploading(true);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch('/api/upload', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Upload failed');
-      setForm((f) => ({ ...f, image: data.url }));
+      const url = await uploadToR2(file, 'categories');
+      setForm((f) => ({ ...f, image: url }));
       toast.success('Image uploaded');
     } catch (err) {
       toast.error(err.message);
-      setPreview('');
+      setPreview(previousPreview);
     } finally {
       setUploading(false);
+      e.target.value = '';
     }
   }
 
@@ -155,12 +186,7 @@ export default function AdminCategoriesPage() {
     try {
       const uploaded = [];
       for (const file of files) {
-        const fd = new FormData();
-        fd.append('file', file);
-        const res = await fetch('/api/upload', { method: 'POST', body: fd });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Upload failed');
-        uploaded.push(data.url);
+        uploaded.push(await uploadToR2(file, 'categories'));
       }
       setForm((f) => ({ ...f, sizeChart: [...(f.sizeChart || []), ...uploaded] }));
       toast.success(`${uploaded.length} size chart image${uploaded.length > 1 ? 's' : ''} uploaded`);
@@ -214,26 +240,25 @@ export default function AdminCategoriesPage() {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= list.length) return;
 
-    const current = list[index];
-    const target = list[targetIndex];
-
-    const currentOrder = current.sortOrder ?? 0;
-    const targetOrder = target.sortOrder ?? 0;
+    // Swapping raw sortOrder values breaks when siblings share the same value
+    // (e.g. all 0). Instead, reorder the list and renumber every sibling 1..n.
+    const reordered = [...list];
+    [reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]];
 
     setReordering(true);
     try {
-      await Promise.all([
-        fetch(`/api/categories/${current._id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sortOrder: targetOrder })
-        }),
-        fetch(`/api/categories/${target._id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sortOrder: currentOrder })
-        })
-      ]);
+      const results = await Promise.all(
+        reordered.map((c, i) =>
+          c.sortOrder === i + 1
+            ? Promise.resolve({ ok: true })
+            : fetch(`/api/categories/${c._id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sortOrder: i + 1 })
+              })
+        )
+      );
+      if (results.some((r) => !r.ok)) throw new Error('Reorder failed');
       await load();
     } catch {
       toast.error('Failed to reorder');
@@ -278,10 +303,10 @@ export default function AdminCategoriesPage() {
                   : <><Upload size={14} /> {preview ? 'Change image' : 'Choose image'}</>
                 }
               </button>
-              <p className="text-xs text-brand-ink/40 mt-1">Shown as circular icon on homepage</p>
+              <p className="text-xs text-brand-ink/40 mt-1">Shown as circular icon on homepage (JPG, PNG, WebP or AVIF, max 8 MB)</p>
             </div>
           </div>
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+          <input ref={fileRef} type="file" accept="image/webp,image/jpeg,image/png,image/avif" className="hidden" onChange={handleFileChange} />
 
           <input required placeholder="Category name (e.g. Umbrella Kurtis)" className="w-full border rounded-lg px-3 py-2 text-sm" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           <input placeholder="Slug (auto if blank)" className="w-full border rounded-lg px-3 py-2 text-sm" value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} />
@@ -337,7 +362,7 @@ export default function AdminCategoriesPage() {
                 <span className="text-[10px]">{sizeChartUploading ? 'Uploading…' : 'Add'}</span>
               </button>
             </div>
-            <input ref={sizeChartFileRef} type="file" accept="image/*" multiple className="hidden" onChange={handleSizeChartFilesChange} />
+            <input ref={sizeChartFileRef} type="file" accept="image/webp,image/jpeg,image/png,image/avif" multiple className="hidden" onChange={handleSizeChartFilesChange} />
           </div>
 
           <div>
