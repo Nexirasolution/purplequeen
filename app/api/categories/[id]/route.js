@@ -36,6 +36,13 @@ export const PUT = requireAdmin(async (req, { params }) => {
   await dbConnect();
   const body = await req.json();
   if ('parent' in body) body.parent = body.parent || null;
+
+  // A category without sizes never keeps a size list
+  if ('hasSizes' in body) {
+    body.hasSizes = body.hasSizes !== false;
+    if (!body.hasSizes) body.sizes = [];
+  }
+
   const category = await Category.findOneAndUpdate(getFilter(params.id), body, { new: true });
   if (!category) return NextResponse.json({ error: 'Category not found' }, { status: 404 });
   refreshStorefront();

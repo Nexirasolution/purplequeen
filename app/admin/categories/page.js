@@ -4,7 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { Plus, Trash2, Pencil, X, Upload, Loader2, ArrowUp, ArrowDown, CornerDownRight } from 'lucide-react';
 
-const emptyForm = { name: '', slug: '', image: '', description: '', sizes: '', sortOrder: 0, sizeChart: [], parent: '' };
+const emptyForm = {
+  name: '', slug: '', image: '', description: '',
+  hasSizes: true, sizes: '',
+  sortOrder: 0, sizeChart: [], parent: ''
+};
 
 const ALLOWED_TYPES = ['image/webp', 'image/jpeg', 'image/png', 'image/avif'];
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -78,7 +82,14 @@ function CategoryRow({ category, indent, onMoveUp, onMoveDown, disableUp, disabl
         {category.image && <img src={category.image} alt={category.name} className="w-full h-full object-cover" />}
       </div>
       <div className="flex-1">
-        <p className="font-medium">{category.name}</p>
+        <p className="font-medium">
+          {category.name}
+          {category.hasSizes === false && (
+            <span className="ml-2 text-[10px] font-medium uppercase tracking-wide bg-brand-ink/10 text-brand-ink/60 rounded-full px-2 py-0.5">
+              No sizes
+            </span>
+          )}
+        </p>
         <p className="text-xs text-brand-ink/50">
           /{category.slug} · order: {category.sortOrder ?? 0}
           {category.sizeChart?.length ? ` · ${category.sizeChart.length} size chart image${category.sizeChart.length > 1 ? 's' : ''}` : ''}
@@ -124,6 +135,7 @@ export default function AdminCategoriesPage() {
       slug: c.slug,
       image: c.image || '',
       description: c.description || '',
+      hasSizes: c.hasSizes !== false, // old categories (no field) count as "has sizes"
       sizes: (c.sizes || []).join(', '),
       sortOrder: c.sortOrder ?? 0,
       sizeChart: normalizeSizeChart(c.sizeChart),
@@ -206,7 +218,9 @@ export default function AdminCategoriesPage() {
     e.preventDefault();
     const payload = {
       ...form,
-      sizes: form.sizes.split(',').map((s) => s.trim()).filter(Boolean),
+      hasSizes: !!form.hasSizes,
+      // No sizes => never save a size list
+      sizes: form.hasSizes ? form.sizes.split(',').map((s) => s.trim()).filter(Boolean) : [],
       sortOrder: Number(form.sortOrder) || 0,
       sizeChart: form.sizeChart || [],
       parent: form.parent || null
@@ -330,40 +344,68 @@ export default function AdminCategoriesPage() {
             </select>
           </div>
 
-          <input placeholder="Available sizes, comma separated (S, M, L, XL)" className="w-full border rounded-lg px-3 py-2 text-sm" value={form.sizes} onChange={(e) => setForm({ ...form, sizes: e.target.value })} />
+          {/* Does this category use sizes? */}
+          <div className="border border-brand-ink/10 rounded-lg p-3">
+            <label className="flex items-center gap-2 text-sm font-medium cursor-pointer w-fit">
+              <input
+                type="checkbox"
+                checked={!!form.hasSizes}
+                onChange={(e) => setForm({ ...form, hasSizes: e.target.checked })}
+                className="w-4 h-4"
+              />
+              This category has sizes
+            </label>
+            <p className="text-xs text-brand-ink/40 mt-1">
+              {form.hasSizes
+                ? 'Customers must pick a size before adding to cart.'
+                : 'Products here have no sizes: you only enter one stock / price per product, and customers are never asked to pick a size.'}
+            </p>
+
+            {form.hasSizes && (
+              <input
+                placeholder="Available sizes, comma separated (S, M, L, XL)"
+                className="w-full border rounded-lg px-3 py-2 text-sm mt-3"
+                value={form.sizes}
+                onChange={(e) => setForm({ ...form, sizes: e.target.value })}
+              />
+            )}
+          </div>
+
           <textarea placeholder="Description" className="w-full border rounded-lg px-3 py-2 text-sm" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
 
           {/* Size chart — one or more images, used as the fallback on any
               product in this category that has no size chart of its own */}
-          <div>
-            <label className="block text-xs text-brand-ink/50 mb-1">
-              Size chart images (optional — shown as a swipeable gallery on the storefront)
-            </label>
-            <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
-              {(form.sizeChart || []).map((url, idx) => (
-                <div key={idx} className="relative aspect-square rounded-md overflow-hidden bg-brand-cream border border-brand-ink/10">
-                  <img src={url} alt="" className="w-full h-full object-cover" />
-                  <button
-                    type="button"
-                    onClick={() => removeSizeChartImage(idx)}
-                    className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center text-white"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                disabled={sizeChartUploading}
-                onClick={() => sizeChartFileRef.current?.click()}
-                className="aspect-square rounded-md border-2 border-dashed border-brand-ink/20 flex flex-col items-center justify-center gap-1 text-brand-ink/40 hover:border-brand-magenta/40 disabled:opacity-50"
-              >
-                {sizeChartUploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                <span className="text-[10px]">{sizeChartUploading ? 'Uploading…' : 'Add'}</span>
-              </button>
+          {form.hasSizes && (
+            <div>
+              <label className="block text-xs text-brand-ink/50 mb-1">
+                Size chart images (optional — shown as a swipeable gallery on the storefront)
+              </label>
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
+                {(form.sizeChart || []).map((url, idx) => (
+                  <div key={idx} className="relative aspect-square rounded-md overflow-hidden bg-brand-cream border border-brand-ink/10">
+                    <img src={url} alt="" className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => removeSizeChartImage(idx)}
+                      className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center text-white"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  disabled={sizeChartUploading}
+                  onClick={() => sizeChartFileRef.current?.click()}
+                  className="aspect-square rounded-md border-2 border-dashed border-brand-ink/20 flex flex-col items-center justify-center gap-1 text-brand-ink/40 hover:border-brand-magenta/40 disabled:opacity-50"
+                >
+                  {sizeChartUploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                  <span className="text-[10px]">{sizeChartUploading ? 'Uploading…' : 'Add'}</span>
+                </button>
+              </div>
+              <input ref={sizeChartFileRef} type="file" accept="image/webp,image/jpeg,image/png,image/avif" multiple className="hidden" onChange={handleSizeChartFilesChange} />
             </div>
-            <input ref={sizeChartFileRef} type="file" accept="image/webp,image/jpeg,image/png,image/avif" multiple className="hidden" onChange={handleSizeChartFilesChange} />
-          </div>
+          )}
 
           <div>
             <label className="block text-xs text-brand-ink/50 mb-1">

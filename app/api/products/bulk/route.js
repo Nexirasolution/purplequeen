@@ -9,6 +9,7 @@ import { computeBasePrice } from '@/lib/pricing';
 import { sanitizeFreeShipping } from '@/lib/freeShipping';
 import { sanitizeOptionGroups } from '@/lib/optionGroups';
 import { sanitizeDiscount } from '@/lib/discount';
+import { NO_SIZE } from '@/lib/noSize';
 
 // POST /api/products/bulk
 // body: {
@@ -27,6 +28,8 @@ import { sanitizeDiscount } from '@/lib/discount';
 // - Title = auto-derived from the CATEGORY name + zero-padded number.
 // - SKU = admin-typed short code + zero-padded number.
 // - Each size may carry its own optional `price`; blank/0 => the default `price` is used.
+// - If the category has NO sizes (hasSizes === false), the products get a single
+//   hidden "One Size" entry that carries the stock / price.
 // - isReadyToShip / sizeChart / optionGroups / sleeveOptions / zipOptions / free shipping / discount
 //   apply to every product in the batch.
 export const POST = requireAdmin(async (req) => {
@@ -77,21 +80,32 @@ export const POST = requireAdmin(async (req) => {
       return NextResponse.json({ error: 'Price is required' }, { status: 400 });
     }
 
+    const cat = await Category.findById(category);
+    if (!cat) return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+    const categoryHasSizes = cat.hasSizes !== false;
+
     // Per-size price: only kept when it's a positive number, otherwise null (= use default price)
-    const sizeEntries = (sizes || [])
+    let sizeEntries = (sizes || [])
       .filter((s) => s.size)
       .map((s) => ({
         size: s.size,
         stock: Number(s.stock) || 0,
         price: Number(s.price) > 0 ? Number(s.price) : null,
       }));
-    if (sizeEntries.length === 0) {
+
+    if (!categoryHasSizes) {
+      // No-size category: collapse to ONE hidden "One Size" entry
+      const first = sizeEntries[0] || { stock: 0, price: null };
+      sizeEntries = [{ size: NO_SIZE, stock: first.stock, price: first.price }];
+    } else if (sizeEntries.length === 0) {
       return NextResponse.json({ error: 'At least one size with stock is required' }, { status: 400 });
     }
 
-    const sizeChartImages = Array.isArray(sizeChart)
-      ? sizeChart.filter(Boolean)
-      : (sizeChart ? [sizeChart] : []);
+    const sizeChartImages = !categoryHasSizes
+      ? []
+      : Array.isArray(sizeChart)
+        ? sizeChart.filter(Boolean)
+        : (sizeChart ? [sizeChart] : []);
 
     const ALLOWED_SLEEVE = ['Full Sleeve', 'Half Sleeve', 'Elbow Sleeve', 'Sleeveless'];
     const ALLOWED_ZIP = ['With Zip', 'Without Zip'];
@@ -104,9 +118,6 @@ export const POST = requireAdmin(async (req) => {
 
     // Admin-defined types + choices (+ extra price per choice)
     const optionGroupsClean = sanitizeOptionGroups(optionGroups);
-
-    const cat = await Category.findById(category);
-    if (!cat) return NextResponse.json({ error: 'Category not found' }, { status: 404 });
 
     // --- Title code: auto-derived from the category name ---
     const titleCode = (cat.name || 'PRODUCT')

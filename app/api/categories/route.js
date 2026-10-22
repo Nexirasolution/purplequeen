@@ -42,6 +42,10 @@ export const POST = requireAdmin(async (req) => {
   const exists = await Category.findOne({ slug });
   if (exists) return NextResponse.json({ error: 'A category with this slug already exists' }, { status: 409 });
 
+  // A category without sizes never keeps a size list
+  body.hasSizes = body.hasSizes !== false;
+  if (!body.hasSizes) body.sizes = [];
+
   // `parent` should be a category id or null/omitted for a main category.
   // No extra validation of "only one level deep" is enforced server-side —
   // the admin UI only offers top-level categories as parent options, which

@@ -9,6 +9,7 @@ import { Star, ShoppingBag, Zap, Heart, Share2, ChevronLeft, ChevronRight } from
 import { formatINR } from '@/lib/utils';
 import { getSizeStock, getCombinedStock } from '@/lib/stock';
 import { applyDiscount, isDiscountLive } from '@/lib/discount';
+import { NO_SIZE, isNoSizeProduct } from '@/lib/noSize';
 import { useCart } from '@/components/CartContext';
 import { useWishlist } from '@/components/WhishlistContext';
 import ColorSizeSelector from '@/components/ColorSizeSelector';
@@ -45,9 +46,13 @@ export default function ProductClient({ data }) {
   const { isWishlisted, toggleWishlist } = useWishlist();
   const { product, reviews, related } = data;
 
+  // Category without sizes: the customer never picks a size. The hidden
+  // "One Size" entry is auto-selected so stock / cart / checkout work as usual.
+  const noSize = product.category?.hasSizes === false || isNoSizeProduct(product);
+
   const [activeVariant, setActiveVariant] = useState(product.variants?.[0] ?? null);
   const [activeImage, setActiveImage] = useState(0);
-  const [activeSize, setActiveSize] = useState('');
+  const [activeSize, setActiveSize] = useState(noSize ? NO_SIZE : '');
   // LEGACY fixed sleeve / zip (only used by products not yet re-saved in the admin)
   const [activeSleeve, setActiveSleeve] = useState('');
   const [activeZip, setActiveZip] = useState('');
@@ -97,7 +102,10 @@ export default function ProductClient({ data }) {
   const discount = compareBase ? Math.round(((compareBase - currentBasePrice) / compareBase) * 100) : 0;
 
   // Product's own size chart wins; otherwise fall back to the category's.
-  const sizeChartImages = product.sizeChart?.length ? product.sizeChart : (product.category?.sizeChart || []);
+  // (No size chart at all for categories without sizes.)
+  const sizeChartImages = noSize
+    ? []
+    : product.sizeChart?.length ? product.sizeChart : (product.category?.sizeChart || []);
 
   const selectedSizeStock = getSizeStock(activeVariant, activeSize);
   const sizeOutOfStock = !!activeSize && selectedSizeStock <= 0;
@@ -202,7 +210,8 @@ export default function ProductClient({ data }) {
   function handleColorChange(v) {
     setActiveVariant(v);
     setActiveImage(0);
-    setActiveSize('');
+    // No-size products keep their hidden size selected when the colour changes
+    setActiveSize(noSize ? NO_SIZE : '');
     setQty(1);
   }
 
@@ -260,7 +269,8 @@ export default function ProductClient({ data }) {
 
   // Shared validation for Add to Cart and Buy Now
   function validateAndAdd() {
-    if (!activeSize) { toast.error('Please select a size'); return false; }
+    // A size is only required for categories that use sizes
+    if (!noSize && !activeSize) { toast.error('Please select a size'); return false; }
     if (product.sleeveOptions?.length && !activeSleeve) { toast.error('Please select a sleeve type'); return false; }
     if (product.zipOptions?.length && !activeZip) { toast.error('Please select a zip type'); return false; }
     for (const g of optionGroups) {
@@ -269,7 +279,7 @@ export default function ProductClient({ data }) {
         return false;
       }
     }
-    if (stock <= 0) { toast.error('This combination is out of stock'); return false; }
+    if (stock <= 0) { toast.error(noSize ? 'This item is out of stock' : 'This combination is out of stock'); return false; }
     if (qty > stock) {
       toast.error(`Only ${stock} left in stock`);
       setQty(stock);
@@ -481,6 +491,7 @@ export default function ProductClient({ data }) {
                 onColorChange={handleColorChange}
                 activeSize={activeSize}
                 onSizeChange={handleSizeChange}
+                hideSizes={noSize}
                 categoryType={product.category?.type}
                 sizeChartImages={sizeChartImages}
                 onViewSizeChart={() => setSizeChartOpen(true)}

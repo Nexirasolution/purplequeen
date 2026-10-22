@@ -10,6 +10,7 @@ import { uploadFile } from '@/lib/uploadFile';
 import { computeBasePrice } from '@/lib/pricing';
 import { applyDiscount } from '@/lib/discount';
 import { formatINR } from '@/lib/utils';
+import { NO_SIZE } from '@/lib/noSize';
 
 // Design tokens: same royal purple / gold / ivory system as the rest of the site.
 // Palette: #4B087A #F7B900 #FFF5E8 #24052F #D9B4E8
@@ -347,6 +348,11 @@ export default function ProductForm({ initial, productId }) {
     fetch('/api/categories').then((r) => r.json()).then((d) => setCategories(d.categories || []));
   }, []);
 
+  // Does the chosen category use sizes? (default true until a category is chosen / loaded)
+  const selectedCategoryId = form.category?._id || form.category;
+  const selectedCategory = categories.find((c) => c._id === selectedCategoryId);
+  const hasSizes = selectedCategory ? selectedCategory.hasSizes !== false : true;
+
   function update(field, value) { setForm((f) => ({ ...f, [field]: value })); }
 
   function updateDiscount(key, value) {
@@ -491,6 +497,17 @@ export default function ProductForm({ initial, productId }) {
       return;
     }
 
+    // Sizes are only required when the category uses sizes
+    if (hasSizes) {
+      const missing = form.variants.findIndex(
+        (v) => !(v.sizes || []).some((s) => (s.size || '').trim())
+      );
+      if (missing !== -1) {
+        toast.error(`Variant ${missing + 1} needs at least one size`);
+        return;
+      }
+    }
+
     // Discount validation (only when switched on)
     const d = form.discount || {};
     if (d.isActive) {
@@ -571,18 +588,37 @@ export default function ProductForm({ initial, productId }) {
           stock: Number(o.stock) || 0,
           sku: o.sku || '',
         })),
-      variants: form.variants.map((v) => ({
-        ...v,
-        price: Number(v.price),
-        compareAtPrice: Number(v.compareAtPrice) || 0,
-        images: v.images.filter(Boolean),
-        sizes: v.sizes.map((s) => ({
-          ...s,
-          stock: Number(s.stock),
-          // blank = use the variant price
-          price: s.price === '' || s.price == null ? null : Number(s.price),
-        })),
-      })),
+      variants: form.variants.map((v) => {
+        const toPrice = (p) => (p === '' || p == null ? null : Number(p));
+        // No-size category: ONE hidden "One Size" entry holds the stock / price.
+        // Size category: every row needs a name; blank rows are dropped.
+        const sizes = hasSizes
+          ? v.sizes
+              .filter((s) => (s.size || '').trim())
+              .map((s) => ({
+                ...s,
+                size: s.size.trim(),
+                stock: Number(s.stock) || 0,
+                // blank = use the variant price
+                price: toPrice(s.price),
+              }))
+          : [
+              {
+                size: NO_SIZE,
+                stock: Number(v.sizes?.[0]?.stock) || 0,
+                sku: v.sizes?.[0]?.sku || '',
+                price: toPrice(v.sizes?.[0]?.price),
+              },
+            ];
+
+        return {
+          ...v,
+          price: Number(v.price),
+          compareAtPrice: Number(v.compareAtPrice) || 0,
+          images: v.images.filter(Boolean),
+          sizes,
+        };
+      }),
     };
     delete payload.sku;
 
@@ -639,8 +675,17 @@ export default function ProductForm({ initial, productId }) {
               onBlur={(e) => (e.target.style.borderColor = LINE)}
             >
               <option value="">Select category</option>
-              {categories.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
+              {categories.map((c) => (
+                <option key={c._id} value={c._id}>
+                  {c.name}{c.hasSizes === false ? ' (no sizes)' : ''}
+                </option>
+              ))}
             </select>
+            {selectedCategory && !hasSizes && (
+              <p style={{ fontSize: '11px', color: INK_SOFT, fontFamily: 'sans-serif', marginTop: '4px' }}>
+                This category has no sizes: just enter one stock / price per variant below.
+              </p>
+            )}
           </div>
           <div>
             <label style={labelStyle}>Fabric</label>
@@ -689,41 +734,43 @@ export default function ProductForm({ initial, productId }) {
           </div>
 
           {/* Size chart: one or more images. If left empty, the storefront
-              falls back to this product's category size chart. */}
-          <div className="sm:col-span-2">
-            <label style={labelStyle}>
-              Size Chart <span style={{ fontWeight: '400', textTransform: 'none', letterSpacing: 0 }}>
-                (optional — shown as a gallery on the product page; falls back to the category's size chart if left empty)
-              </span>
-            </label>
-            <div className="grid grid-cols-4 sm:grid-cols-6 gap-3 mt-2">
-              {(form.sizeChart || []).map((url, idx) => (
-                <div key={idx} className="relative aspect-square overflow-hidden" style={{ borderRadius: '4px', border: `1px solid ${LINE}` }}>
-                  <img src={url} alt="" className="w-full h-full object-cover" />
-                  <button
-                    type="button"
-                    onClick={() => removeSizeChartImage(idx)}
-                    className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center"
-                    style={{ background: 'rgba(36,5,47,0.7)', color: PAPER }}
-                    aria-label="Remove size chart image"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                disabled={sizeChartUploading}
-                onClick={() => sizeChartFileRef.current?.click()}
-                className="aspect-square flex flex-col items-center justify-center gap-1 disabled:opacity-50"
-                style={{ borderRadius: '4px', border: `1.5px dashed ${PURPLE}`, background: WASH, color: PURPLE, cursor: 'pointer' }}
-              >
-                {sizeChartUploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                <span style={{ fontSize: '10px', fontFamily: 'sans-serif' }}>{sizeChartUploading ? 'Uploading…' : 'Add'}</span>
-              </button>
+              falls back to this product's category size chart. Hidden for no-size categories. */}
+          {hasSizes && (
+            <div className="sm:col-span-2">
+              <label style={labelStyle}>
+                Size Chart <span style={{ fontWeight: '400', textTransform: 'none', letterSpacing: 0 }}>
+                  (optional — shown as a gallery on the product page; falls back to the category's size chart if left empty)
+                </span>
+              </label>
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-3 mt-2">
+                {(form.sizeChart || []).map((url, idx) => (
+                  <div key={idx} className="relative aspect-square overflow-hidden" style={{ borderRadius: '4px', border: `1px solid ${LINE}` }}>
+                    <img src={url} alt="" className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => removeSizeChartImage(idx)}
+                      className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center"
+                      style={{ background: 'rgba(36,5,47,0.7)', color: PAPER }}
+                      aria-label="Remove size chart image"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  disabled={sizeChartUploading}
+                  onClick={() => sizeChartFileRef.current?.click()}
+                  className="aspect-square flex flex-col items-center justify-center gap-1 disabled:opacity-50"
+                  style={{ borderRadius: '4px', border: `1.5px dashed ${PURPLE}`, background: WASH, color: PURPLE, cursor: 'pointer' }}
+                >
+                  {sizeChartUploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                  <span style={{ fontSize: '10px', fontFamily: 'sans-serif' }}>{sizeChartUploading ? 'Uploading…' : 'Add'}</span>
+                </button>
+              </div>
+              <input ref={sizeChartFileRef} type="file" accept="image/*" multiple className="hidden" onChange={handleSizeChartFilesChange} />
             </div>
-            <input ref={sizeChartFileRef} type="file" accept="image/*" multiple className="hidden" onChange={handleSizeChartFilesChange} />
-          </div>
+          )}
 
           {/* Customization options: admin-defined types (e.g. Sleeve Type, Zip Type)
               with choices (sub-types) and an optional extra price per choice. */}
@@ -925,66 +972,110 @@ export default function ProductForm({ initial, productId }) {
               + Add another image
             </button>
 
-            <p style={{ fontSize: '12px', color: INK_SOFT, fontFamily: 'sans-serif', fontWeight: '500', marginBottom: '2px' }}>
-              Sizes, Stock &amp; Price
-            </p>
-            <p style={{ fontSize: '11px', color: INK_SOFT, fontFamily: 'sans-serif', marginBottom: '8px' }}>
-              Leave a size's price blank to use the default price above. Customers see each size's price on the product page.
-            </p>
-            {v.sizes.map((s, sIdx) => (
-              <div key={sIdx} className="flex flex-wrap gap-2 mb-2 items-center">
-                <input
-                  placeholder="Size (e.g. M, 38, Free Size)"
-                  style={{ ...inputStyle, width: '140px', marginTop: 0 }}
-                  value={s.size}
-                  onChange={(e) => updateSize(vIdx, sIdx, 'size', e.target.value)}
-                  onFocus={(e) => (e.target.style.borderColor = PURPLE)}
-                  onBlur={(e) => (e.target.style.borderColor = LINE)}
-                />
-                <input
-                  type="number"
-                  placeholder="Stock"
-                  style={{ ...inputStyle, width: '90px', marginTop: 0 }}
-                  value={s.stock}
-                  onChange={(e) => updateSize(vIdx, sIdx, 'stock', e.target.value)}
-                  onFocus={(e) => (e.target.style.borderColor = PURPLE)}
-                  onBlur={(e) => (e.target.style.borderColor = LINE)}
-                />
-                <input
-                  type="number"
-                  min="0"
-                  placeholder="Price ₹ (optional)"
-                  style={{ ...inputStyle, width: '140px', marginTop: 0 }}
-                  value={s.price ?? ''}
-                  onChange={(e) => updateSize(vIdx, sIdx, 'price', e.target.value)}
-                  onFocus={(e) => (e.target.style.borderColor = PURPLE)}
-                  onBlur={(e) => (e.target.style.borderColor = LINE)}
-                />
-                <input
-                  placeholder="SKU (optional)"
-                  style={{ ...inputStyle, flex: 1, minWidth: '120px', marginTop: 0 }}
-                  value={s.sku}
-                  onChange={(e) => updateSize(vIdx, sIdx, 'sku', e.target.value)}
-                  onFocus={(e) => (e.target.style.borderColor = PURPLE)}
-                  onBlur={(e) => (e.target.style.borderColor = LINE)}
-                />
+            {hasSizes ? (
+              <>
+                <p style={{ fontSize: '12px', color: INK_SOFT, fontFamily: 'sans-serif', fontWeight: '500', marginBottom: '2px' }}>
+                  Sizes, Stock &amp; Price
+                </p>
+                <p style={{ fontSize: '11px', color: INK_SOFT, fontFamily: 'sans-serif', marginBottom: '8px' }}>
+                  Leave a size's price blank to use the default price above. Customers see each size's price on the product page.
+                </p>
+                {v.sizes.map((s, sIdx) => (
+                  <div key={sIdx} className="flex flex-wrap gap-2 mb-2 items-center">
+                    <input
+                      placeholder="Size (e.g. M, 38, Free Size)"
+                      style={{ ...inputStyle, width: '140px', marginTop: 0 }}
+                      value={s.size}
+                      onChange={(e) => updateSize(vIdx, sIdx, 'size', e.target.value)}
+                      onFocus={(e) => (e.target.style.borderColor = PURPLE)}
+                      onBlur={(e) => (e.target.style.borderColor = LINE)}
+                    />
+                    <input
+                      type="number"
+                      placeholder="Stock"
+                      style={{ ...inputStyle, width: '90px', marginTop: 0 }}
+                      value={s.stock}
+                      onChange={(e) => updateSize(vIdx, sIdx, 'stock', e.target.value)}
+                      onFocus={(e) => (e.target.style.borderColor = PURPLE)}
+                      onBlur={(e) => (e.target.style.borderColor = LINE)}
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="Price ₹ (optional)"
+                      style={{ ...inputStyle, width: '140px', marginTop: 0 }}
+                      value={s.price ?? ''}
+                      onChange={(e) => updateSize(vIdx, sIdx, 'price', e.target.value)}
+                      onFocus={(e) => (e.target.style.borderColor = PURPLE)}
+                      onBlur={(e) => (e.target.style.borderColor = LINE)}
+                    />
+                    <input
+                      placeholder="SKU (optional)"
+                      style={{ ...inputStyle, flex: 1, minWidth: '120px', marginTop: 0 }}
+                      value={s.sku}
+                      onChange={(e) => updateSize(vIdx, sIdx, 'sku', e.target.value)}
+                      onFocus={(e) => (e.target.style.borderColor = PURPLE)}
+                      onBlur={(e) => (e.target.style.borderColor = LINE)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeSize(vIdx, sIdx)}
+                      style={{ color: INK_SOFT, cursor: 'pointer', flexShrink: 0 }}
+                      aria-label="Remove size"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
                 <button
                   type="button"
-                  onClick={() => removeSize(vIdx, sIdx)}
-                  style={{ color: INK_SOFT, cursor: 'pointer', flexShrink: 0 }}
-                  aria-label="Remove size"
+                  onClick={() => addSize(vIdx)}
+                  style={{ fontSize: '12px', color: PURPLE, fontFamily: 'sans-serif', fontWeight: '500', cursor: 'pointer' }}
                 >
-                  <Trash2 size={14} />
+                  + Add size
                 </button>
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => addSize(vIdx)}
-              style={{ fontSize: '12px', color: PURPLE, fontFamily: 'sans-serif', fontWeight: '500', cursor: 'pointer' }}
-            >
-              + Add size
-            </button>
+              </>
+            ) : (
+              <>
+                {/* No-size category: one stock / price row, no size name */}
+                <p style={{ fontSize: '12px', color: INK_SOFT, fontFamily: 'sans-serif', fontWeight: '500', marginBottom: '2px' }}>
+                  Stock &amp; Price
+                </p>
+                <p style={{ fontSize: '11px', color: INK_SOFT, fontFamily: 'sans-serif', marginBottom: '8px' }}>
+                  This category has no sizes. Leave the price blank to use the default price above.
+                </p>
+                <div className="flex flex-wrap gap-2 mb-2 items-center">
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="Stock"
+                    style={{ ...inputStyle, width: '110px', marginTop: 0 }}
+                    value={v.sizes?.[0]?.stock ?? 0}
+                    onChange={(e) => updateSize(vIdx, 0, 'stock', e.target.value)}
+                    onFocus={(e) => (e.target.style.borderColor = PURPLE)}
+                    onBlur={(e) => (e.target.style.borderColor = LINE)}
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="Price ₹ (optional)"
+                    style={{ ...inputStyle, width: '150px', marginTop: 0 }}
+                    value={v.sizes?.[0]?.price ?? ''}
+                    onChange={(e) => updateSize(vIdx, 0, 'price', e.target.value)}
+                    onFocus={(e) => (e.target.style.borderColor = PURPLE)}
+                    onBlur={(e) => (e.target.style.borderColor = LINE)}
+                  />
+                  <input
+                    placeholder="SKU (optional)"
+                    style={{ ...inputStyle, flex: 1, minWidth: '120px', marginTop: 0 }}
+                    value={v.sizes?.[0]?.sku ?? ''}
+                    onChange={(e) => updateSize(vIdx, 0, 'sku', e.target.value)}
+                    onFocus={(e) => (e.target.style.borderColor = PURPLE)}
+                    onBlur={(e) => (e.target.style.borderColor = LINE)}
+                  />
+                </div>
+              </>
+            )}
           </div>
         ))}
       </div>

@@ -89,6 +89,7 @@ export default function ColorSizeSelector({
   onColorChange,
   activeSize,
   onSizeChange,
+  hideSizes = false, // true for categories without sizes: hides the size picker + size chart link
   categoryType,
   sizeChartImages,
   onViewSizeChart,
@@ -115,7 +116,7 @@ export default function ColorSizeSelector({
   const showSizePrices = !!activeVariant?.sizes?.some((s) => priceOfSize(s) !== variantPrice);
 
   const hasColors = variants?.some((v) => v.color && v.color.trim());
-  const hasSizeChart = Array.isArray(sizeChartImages) && sizeChartImages.length > 0;
+  const hasSizeChart = !hideSizes && Array.isArray(sizeChartImages) && sizeChartImages.length > 0;
   const hasSleeveOptions = Array.isArray(sleeveOptions) && sleeveOptions.length > 0;
   const hasZipOptions = Array.isArray(zipOptions) && zipOptions.length > 0;
 
@@ -174,62 +175,64 @@ export default function ColorSizeSelector({
         </div>
       )}
 
-      {/* Size selector */}
-      <div>
-        <p className="text-sm mb-2.5" style={{ color: INK_SOFT }}>
-          {isJewellery ? 'Ring/Bangle Size' : 'Size'}
-        </p>
-
-        <div className="flex gap-2 flex-wrap">
-          {activeVariant?.sizes?.map((s) => {
-            const outOfStock = s.stock <= 0;
-            const active = activeSize === s.size;
-            return (
-              <button
-                key={s.size}
-                disabled={outOfStock}
-                onClick={() => onSizeChange(s.size)}
-                className={`${showSizePrices ? 'min-w-[64px] h-[48px] px-3 flex flex-col items-center justify-center leading-tight' : 'min-w-[40px] h-[36px] px-2.5'} text-sm font-medium transition-colors`}
-                style={{
-                  borderRadius: '4px',
-                  border: `1px solid ${outOfStock ? LINE : active ? PURPLE : LINE}`,
-                  background: active ? PURPLE : PAPER,
-                  color: outOfStock ? DISABLED : active ? PAPER : INK,
-                  textDecoration: outOfStock ? 'line-through' : 'none',
-                  cursor: outOfStock ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {s.size}
-                {showSizePrices && (
-                  <span className="text-[11px] font-normal" style={{ opacity: 0.75 }}>
-                    {formatINR(priceOfSize(s))}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        {activeSize && sizeStock(activeSize) <= 5 && sizeStock(activeSize) > 0 && (
-          <p className="mt-2.5 text-xs font-medium" style={{ color: PURPLE }}>
-            Only {sizeStock(activeSize)} left in stock
+      {/* Size selector: hidden entirely for categories without sizes */}
+      {!hideSizes && (
+        <div>
+          <p className="text-sm mb-2.5" style={{ color: INK_SOFT }}>
+            {isJewellery ? 'Ring/Bangle Size' : 'Size'}
           </p>
-        )}
 
-        {/* Size chart: resolved by the parent as product.sizeChart, falling
-            back to category.sizeChart. Opens a swipeable carousel when there's
-            more than one image. */}
-        {hasSizeChart && (
-          <button
-            type="button"
-            onClick={onViewSizeChart}
-            className="mt-2.5 text-xs font-medium underline underline-offset-2"
-            style={{ color: INK_SOFT }}
-          >
-            View size chart{sizeChartImages.length > 1 ? ` (${sizeChartImages.length})` : ''}
-          </button>
-        )}
-      </div>
+          <div className="flex gap-2 flex-wrap">
+            {activeVariant?.sizes?.map((s) => {
+              const outOfStock = s.stock <= 0;
+              const active = activeSize === s.size;
+              return (
+                <button
+                  key={s.size}
+                  disabled={outOfStock}
+                  onClick={() => onSizeChange(s.size)}
+                  className={`${showSizePrices ? 'min-w-[64px] h-[48px] px-3 flex flex-col items-center justify-center leading-tight' : 'min-w-[40px] h-[36px] px-2.5'} text-sm font-medium transition-colors`}
+                  style={{
+                    borderRadius: '4px',
+                    border: `1px solid ${outOfStock ? LINE : active ? PURPLE : LINE}`,
+                    background: active ? PURPLE : PAPER,
+                    color: outOfStock ? DISABLED : active ? PAPER : INK,
+                    textDecoration: outOfStock ? 'line-through' : 'none',
+                    cursor: outOfStock ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {s.size}
+                  {showSizePrices && (
+                    <span className="text-[11px] font-normal" style={{ opacity: 0.75 }}>
+                      {formatINR(priceOfSize(s))}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {activeSize && sizeStock(activeSize) <= 5 && sizeStock(activeSize) > 0 && (
+            <p className="mt-2.5 text-xs font-medium" style={{ color: PURPLE }}>
+              Only {sizeStock(activeSize)} left in stock
+            </p>
+          )}
+
+          {/* Size chart: resolved by the parent as product.sizeChart, falling
+              back to category.sizeChart. Opens a swipeable carousel when there's
+              more than one image. */}
+          {hasSizeChart && (
+            <button
+              type="button"
+              onClick={onViewSizeChart}
+              className="mt-2.5 text-xs font-medium underline underline-offset-2"
+              style={{ color: INK_SOFT }}
+            >
+              View size chart{sizeChartImages.length > 1 ? ` (${sizeChartImages.length})` : ''}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Sleeve type selector: product-level, shown only if the admin
           picked one or more allowed options for this product. */}

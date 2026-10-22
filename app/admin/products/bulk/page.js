@@ -8,6 +8,7 @@ import { INDIAN_STATES } from '@/lib/indianStates';
 import { uploadFile } from '@/lib/uploadFile';
 import { applyDiscount } from '@/lib/discount';
 import { formatINR } from '@/lib/utils';
+import { NO_SIZE } from '@/lib/noSize';
 
 export default function BulkAddProductsPage() {
   const router = useRouter();
@@ -23,6 +24,10 @@ export default function BulkAddProductsPage() {
   const [compareAtPrice, setCompareAtPrice] = useState('');
   const [stockBySize, setStockBySize] = useState({}); // { S: 10, M: 10, ... }
   const [priceBySize, setPriceBySize] = useState({}); // { S: '', M: '1299', ... } blank = use default price
+
+  // For categories WITHOUT sizes: one stock / price for every product
+  const [noSizeStock, setNoSizeStock] = useState('');
+  const [noSizePrice, setNoSizePrice] = useState('');
 
   // Applies to every product created in this batch
   const [isReadyToShip, setIsReadyToShip] = useState(false);
@@ -44,7 +49,7 @@ export default function BulkAddProductsPage() {
   const [sizeChart, setSizeChart] = useState([]);
   const [sizeChartUploading, setSizeChartUploading] = useState(false);
 
-  // Fallback for categories that have no predefined sizes configured
+  // Fallback for size categories that have no predefined sizes configured
   const [manualSizeName, setManualSizeName] = useState('');
   const [manualSizeStock, setManualSizeStock] = useState('');
   const [manualSizePrice, setManualSizePrice] = useState('');
@@ -64,6 +69,8 @@ export default function BulkAddProductsPage() {
   }, []);
 
   const selectedCategory = categories.find((c) => c._id === category);
+  // Old categories have no `hasSizes` field => treated as "has sizes"
+  const hasSizes = selectedCategory ? selectedCategory.hasSizes !== false : true;
   const titlePreview = (selectedCategory?.name || '')
     .trim()
     .toUpperCase()
@@ -79,6 +86,8 @@ export default function BulkAddProductsPage() {
     setManualSizeName('');
     setManualSizeStock('');
     setManualSizePrice('');
+    setNoSizeStock('');
+    setNoSizePrice('');
   }, [category, categories]);
 
   function toggleSleeveOption(opt) {
@@ -149,14 +158,11 @@ export default function BulkAddProductsPage() {
 
   // Preview: lowest price in the batch (default price or any per-size price) -> offer price
   const previewBase = (() => {
-    const prices = [Number(price) || 0];
-    const perSize = [
-      ...Object.values(priceBySize),
-      ...manualSizes.map((s) => s.price),
-    ]
-      .map((v) => Number(v))
-      .filter((v) => v > 0);
-    const all = [...perSize, ...(Number(price) > 0 ? prices : [])].filter((v) => v > 0);
+    const perSize = hasSizes
+      ? [...Object.values(priceBySize), ...manualSizes.map((s) => s.price)]
+      : [noSizePrice];
+    const nums = perSize.map((v) => Number(v)).filter((v) => v > 0);
+    const all = [...nums, ...(Number(price) > 0 ? [Number(price)] : [])];
     return all.length ? Math.min(...all) : 0;
   })();
   const discountPreview =
@@ -189,24 +195,33 @@ export default function BulkAddProductsPage() {
       }
     }
 
-    // Combine predefined-size stock/price and manually-added sizes
-    const fromPredefined = Object.entries(stockBySize)
-      .filter(([, stock]) => stock !== '')
-      .map(([size, stock]) => ({ size, stock: Number(stock), price: toSizePrice(priceBySize[size]) }));
+    let sizes;
+    if (hasSizes) {
+      // Combine predefined-size stock/price and manually-added sizes
+      const fromPredefined = Object.entries(stockBySize)
+        .filter(([, stock]) => stock !== '')
+        .map(([size, stock]) => ({ size, stock: Number(stock), price: toSizePrice(priceBySize[size]) }));
 
-    const fromManual = manualSizes.map((s) => ({
-      size: s.size,
-      stock: Number(s.stock) || 0,
-      price: toSizePrice(s.price),
-    }));
+      const fromManual = manualSizes.map((s) => ({
+        size: s.size,
+        stock: Number(s.stock) || 0,
+        price: toSizePrice(s.price),
+      }));
 
-    const sizes = [...fromPredefined, ...fromManual];
+      sizes = [...fromPredefined, ...fromManual];
 
-    if (sizes.length === 0) {
-      if (categorySizes.length === 0) {
-        return toast.error('This category has no sizes configured — add a size manually below, or set sizes on the category first.');
+      if (sizes.length === 0) {
+        if (categorySizes.length === 0) {
+          return toast.error('This category has no sizes configured — add a size manually below, or set sizes on the category first.');
+        }
+        return toast.error('Enter stock for at least one size');
       }
-      return toast.error('Enter stock for at least one size');
+    } else {
+      // Category without sizes: one hidden "One Size" entry carries stock / price
+      if (noSizeStock === '' || Number(noSizeStock) < 0) {
+        return toast.error('Enter the stock for each product');
+      }
+      sizes = [{ size: NO_SIZE, stock: Number(noSizeStock), price: toSizePrice(noSizePrice) }];
     }
 
     setSubmitting(true);
@@ -239,7 +254,7 @@ export default function BulkAddProductsPage() {
           sizes,
           images: imageUrls,
           isReadyToShip,
-          sizeChart,
+          sizeChart: hasSizes ? sizeChart : [],
           sleeveOptions,
           zipOptions,
           freeShipping: shipMode === 'all',
@@ -301,7 +316,9 @@ export default function BulkAddProductsPage() {
             >
               <option value="">Select category...</option>
               {categories.map((c) => (
-                <option key={c._id} value={c._id}>{c.name}</option>
+                <option key={c._id} value={c._id}>
+                  {c.name}{c.hasSizes === false ? ' (no sizes)' : ''}
+                </option>
               ))}
             </select>
             {category && (
@@ -337,7 +354,9 @@ export default function BulkAddProductsPage() {
               required
             />
             <p className="text-xs text-brand-ink/40 mt-1">
-              Used for every size that doesn't have its own price below.
+              {hasSizes
+                ? "Used for every size that doesn't have its own price below."
+                : 'Price of every product in this batch.'}
             </p>
           </div>
           <div>
@@ -495,43 +514,45 @@ export default function BulkAddProductsPage() {
           </div>
         </div>
 
-        {/* Size chart — optional, shared across every product in this batch */}
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            Size chart images (optional — applied to every product in this batch; falls back to the category's size chart if left empty)
-          </label>
-          <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
-            {sizeChart.map((url, idx) => (
-              <div key={idx} className="relative aspect-square rounded-md overflow-hidden bg-brand-ink/5">
-                <img src={url} alt="" className="w-full h-full object-cover" />
-                <button
-                  type="button"
-                  onClick={() => removeSizeChartImage(idx)}
-                  className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center text-white"
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            ))}
-            <button
-              type="button"
-              disabled={sizeChartUploading}
-              onClick={() => document.getElementById('bulk-size-chart-input')?.click()}
-              className="aspect-square rounded-md border-2 border-dashed border-brand-ink/20 flex flex-col items-center justify-center gap-1 text-brand-ink/40 hover:border-brand-magenta/40 disabled:opacity-50"
-            >
-              {sizeChartUploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-              <span className="text-[10px]">{sizeChartUploading ? 'Uploading…' : 'Add'}</span>
-            </button>
+        {/* Size chart — optional, shared across every product in this batch (size categories only) */}
+        {hasSizes && (
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Size chart images (optional — applied to every product in this batch; falls back to the category's size chart if left empty)
+            </label>
+            <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
+              {sizeChart.map((url, idx) => (
+                <div key={idx} className="relative aspect-square rounded-md overflow-hidden bg-brand-ink/5">
+                  <img src={url} alt="" className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => removeSizeChartImage(idx)}
+                    className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center text-white"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                disabled={sizeChartUploading}
+                onClick={() => document.getElementById('bulk-size-chart-input')?.click()}
+                className="aspect-square rounded-md border-2 border-dashed border-brand-ink/20 flex flex-col items-center justify-center gap-1 text-brand-ink/40 hover:border-brand-magenta/40 disabled:opacity-50"
+              >
+                {sizeChartUploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                <span className="text-[10px]">{sizeChartUploading ? 'Uploading…' : 'Add'}</span>
+              </button>
+            </div>
+            <input
+              id="bulk-size-chart-input"
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handleSizeChartFilesChange}
+            />
           </div>
-          <input
-            id="bulk-size-chart-input"
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={handleSizeChartFilesChange}
-          />
-        </div>
+        )}
 
         {/* Free shipping — applies to every product created in this batch */}
         <div>
@@ -598,8 +619,42 @@ export default function BulkAddProductsPage() {
           Mark all products in this batch as "Ready to Ship"
         </label>
 
+        {/* Category WITHOUT sizes: a single stock / price for every product */}
+        {category && !hasSizes && (
+          <div className="border border-brand-ink/10 rounded-lg p-3">
+            <p className="text-sm font-medium mb-1">Stock &amp; price (this category has no sizes)</p>
+            <p className="text-xs text-brand-ink/40 mb-3">
+              Applies to every product in this batch. Leave the price blank to use the default price above.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <div>
+                <label className="block text-xs text-brand-ink/50 mb-1">Stock</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={noSizeStock}
+                  onChange={(e) => setNoSizeStock(e.target.value)}
+                  placeholder="e.g. 10"
+                  className="w-28 px-2 py-1.5 text-sm rounded-lg border border-brand-ink/10 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-brand-ink/50 mb-1">Price ₹ (optional)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={noSizePrice}
+                  onChange={(e) => setNoSizePrice(e.target.value)}
+                  placeholder="default"
+                  className="w-32 px-2 py-1.5 text-sm rounded-lg border border-brand-ink/10 outline-none"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Predefined sizes from the category: stock + optional price per size */}
-        {categorySizes.length > 0 && (
+        {hasSizes && categorySizes.length > 0 && (
           <div>
             <label className="block text-sm font-medium mb-1">Stock &amp; price per size (applies to every product)</label>
             <p className="text-xs text-brand-ink/40 mb-2">
@@ -631,12 +686,12 @@ export default function BulkAddProductsPage() {
           </div>
         )}
 
-        {/* Fallback: category has no sizes configured, let admin add sizes manually for this batch */}
-        {category && categorySizes.length === 0 && (
+        {/* Fallback: size category has no sizes listed, let admin add sizes manually for this batch */}
+        {category && hasSizes && categorySizes.length === 0 && (
           <div className="border border-brand-gold/40 bg-brand-gold/5 rounded-lg p-3">
             <p className="text-sm font-medium mb-1">No sizes configured for this category</p>
             <p className="text-xs text-brand-ink/50 mb-3">
-              Add sizes here for this batch, or go to Categories and set sizes so this shows automatically next time.
+              Add sizes here for this batch, or go to Categories and set sizes (or switch off "This category has sizes") so this shows automatically next time.
             </p>
 
             <div className="flex flex-wrap items-end gap-2 mb-3">
