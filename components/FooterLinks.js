@@ -56,7 +56,7 @@ function AccordionSection({ id, title, openSection, onToggle, children }) {
 }
 
 export default function FooterLinks({
-  categories = [],
+  // categories = [],
   quickLinks = [],
   whatsapp,
   phones = [],
@@ -68,7 +68,7 @@ export default function FooterLinks({
   return (
     <div className="sm:col-span-8 grid grid-cols-1 sm:grid-cols-8 gap-0 sm:gap-8">
       {/* Shop links */}
-      <div className="sm:col-span-2">
+      {/* <div className="sm:col-span-2">
         <AccordionSection id="shop" title="Shop" openSection={openSection} onToggle={toggle}>
           <ul className="space-y-2.5">
             {categories.map((cat) => (
@@ -80,7 +80,7 @@ export default function FooterLinks({
             ))}
           </ul>
         </AccordionSection>
-      </div>
+      </div> */}
 
       {/* Quick links */}
       <div className="sm:col-span-3">

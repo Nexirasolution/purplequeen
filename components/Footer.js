@@ -35,7 +35,7 @@ export default async function Footer() {
 
   const quickLinks = [
     { label: 'Home', href: '/' },
-    { label: 'Shop', href: '/shop' },
+    { label: 'Shop', href: '/products' },
     { label: 'Wishlist', href: '/wishlist' },
     // { label: 'Contact', href: '/contact' },
   ];
@@ -69,7 +69,7 @@ export default async function Footer() {
 
         {/* Shop / Quick Links / Connect: accordion on mobile, columns on desktop */}
         <FooterLinks
-          categories={categories}
+          // categories={categories}
           quickLinks={quickLinks}
           whatsapp={whatsapp}
           phones={PHONES}
