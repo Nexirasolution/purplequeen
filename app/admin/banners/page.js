@@ -9,6 +9,10 @@ const emptyForm = {
   buttonText: 'Shop Now', sortOrder: 0, isActive: true,
 };
 
+// Must match what /api/upload accepts (SVG and GIF are rejected by the server)
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/avif'];
+const MAX_BYTES = 8 * 1024 * 1024;
+
 export default function AdminBannersPage() {
   const [banners, setBanners] = useState([]);
   const [form, setForm] = useState(emptyForm);
@@ -19,32 +23,70 @@ export default function AdminBannersPage() {
   const fileRef = useRef();
 
   async function load() {
-    const res = await fetch('/api/banners?all=true');
-    const data = await res.json();
-    setBanners(data.banners || []);
+    try {
+      const res = await fetch('/api/banners?all=true');
+      const data = await res.json();
+      setBanners(data.banners || []);
+    } catch {
+      toast.error('Failed to load banners');
+    }
   }
   useEffect(() => { load(); }, []);
 
   async function handleFileChange(e) {
-    const file = e.target.files?.[0];
+    const input = e.target;
+    const file = input.files?.[0];
     if (!file) return;
 
-    setPreview(URL.createObjectURL(file));
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      toast.error('Use a JPG, PNG, WebP or AVIF image');
+      input.value = '';
+      return;
+    }
+    if (file.size > MAX_BYTES) {
+      toast.error('Image must be under 8 MB');
+      input.value = '';
+      return;
+    }
 
+    const localUrl = URL.createObjectURL(file);
+    setPreview(localUrl);
     setUploading(true);
+
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch('/api/upload', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Upload failed');
-      setForm((f) => ({ ...f, image: data.url, mobileImage: '' }));
+      // 1. Ask the server for a short-lived signed upload URL
+      const signRes = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contentType: file.type,
+          size: file.size,
+          folder: 'banners',
+        }),
+      });
+      const signData = await signRes.json();
+      if (!signRes.ok) throw new Error(signData.error || 'Could not start upload');
+
+      // 2. PUT the file straight to R2 with exactly the headers the server signed
+      const putRes = await fetch(signData.uploadUrl, {
+        method: 'PUT',
+        headers: signData.headers,
+        body: file,
+      });
+      if (!putRes.ok) throw new Error('Upload to storage failed');
+
+      // 3. Save the public URL in the form; switch preview to the hosted image
+      setForm((f) => ({ ...f, image: signData.url, mobileImage: '' }));
+      setPreview(signData.url);
       toast.success('Image uploaded');
     } catch (err) {
-      toast.error(err.message);
+      toast.error(err.message || 'Upload failed');
       setPreview('');
+      setForm((f) => ({ ...f, image: '' }));
     } finally {
       setUploading(false);
+      URL.revokeObjectURL(localUrl);
+      input.value = ''; // allows re-picking the same file
     }
   }
 
@@ -73,24 +115,29 @@ export default function AdminBannersPage() {
 
   async function submit(e) {
     e.preventDefault();
+    if (uploading) return;
     if (!form.image) { toast.error('Please upload an image'); return; }
 
     const isEditing = Boolean(editingId);
-    const res = await fetch(
-      isEditing ? `/api/banners/${editingId}` : '/api/banners',
-      {
-        method: isEditing ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      }
-    );
+    try {
+      const res = await fetch(
+        isEditing ? `/api/banners/${editingId}` : '/api/banners',
+        {
+          method: isEditing ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(form),
+        }
+      );
 
-    if (res.ok) {
-      toast.success(isEditing ? 'Banner updated' : 'Banner added');
-      closeForm();
-      load();
-    } else {
-      toast.error(isEditing ? 'Failed to update banner' : 'Failed to add banner');
+      if (res.ok) {
+        toast.success(isEditing ? 'Banner updated' : 'Banner added');
+        closeForm();
+        load();
+      } else {
+        toast.error(isEditing ? 'Failed to update banner' : 'Failed to add banner');
+      }
+    } catch {
+      toast.error('Network error. Please try again.');
     }
   }
 
@@ -102,18 +149,26 @@ export default function AdminBannersPage() {
   }
 
   async function toggleActive(b) {
-    await fetch(`/api/banners/${b._id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isActive: !b.isActive }),
-    });
-    load();
+    try {
+      await fetch(`/api/banners/${b._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: !b.isActive }),
+      });
+      load();
+    } catch {
+      toast.error('Failed to update banner');
+    }
   }
 
   async function remove(id) {
     if (!confirm('Delete this banner?')) return;
-    await fetch(`/api/banners/${id}`, { method: 'DELETE' });
-    load();
+    try {
+      await fetch(`/api/banners/${id}`, { method: 'DELETE' });
+      load();
+    } catch {
+      toast.error('Failed to delete banner');
+    }
   }
 
   return (
@@ -153,9 +208,15 @@ export default function AdminBannersPage() {
                 </div>
               )}
             </div>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/avif"
+              className="hidden"
+              onChange={handleFileChange}
+            />
             <p className="text-xs text-brand-ink/40 mt-1">
-              Recommended: wide crop, ~2.4:1 ratio. Keep the main subject/text in the center — it will be auto-cropped to fit mobile screens.
+              Recommended: wide crop, ~2.4:1 ratio, up to 8 MB (JPG, PNG, WebP, AVIF). Keep the main subject/text in the center — it will be auto-cropped to fit mobile screens.
             </p>
           </div>
 
